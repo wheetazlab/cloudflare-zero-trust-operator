@@ -1,0 +1,62 @@
+---
+# Cleanup orphaned state ConfigMaps (IngressRoute no longer exists)
+# Inputs:
+#   - cfzt_ingressroutes: List of all IngressRoutes with cfzt enabled
+#   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
+
+- name: List all state ConfigMaps
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+    label_selectors:
+      - app.kubernetes.io/name=cloudflare-zero-trust-operator
+      - app.kubernetes.io/component=state-tracker
+  register: all_state_cms
+
+- name: Build list of expected ConfigMap names from IngressRoutes
+  ansible.builtin.set_fact:
+    expected_cm_names: []
+
+- name: Generate expected ConfigMap name for each IngressRoute
+  ansible.builtin.set_fact:
+    expected_cm_names: "{{ expected_cm_names + ['cfzt-' + item.metadata.namespace + '-' + item.metadata.name] }}"
+  loop: "{{ cfzt_ingressroutes }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+
+- name: Identify orphaned ConfigMaps
+  ansible.builtin.set_fact:
+    orphaned_cms: "{{ all_state_cms.resources | rejectattr('metadata.name', 'in', expected_cm_names) | list }}"
+
+- name: Debug orphaned ConfigMaps
+  ansible.builtin.debug:
+    msg: |
+      Total state ConfigMaps: {{ all_state_cms.resources | length }}
+      Active IngressRoutes: {{ cfzt_ingressroutes | length }}
+      Expected ConfigMaps: {{ expected_cm_names | length }}
+      Orphaned ConfigMaps: {{ orphaned_cms | length }}
+    verbosity: 1
+
+- name: List orphaned ConfigMap names
+  ansible.builtin.debug:
+    msg: "Orphaned: {{ orphaned_cms | map(attribute='metadata.name') | list }}"
+  when: orphaned_cms | length > 0 and ansible_verbosity > 0
+
+- name: Delete orphaned state ConfigMaps
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: ConfigMap
+    name: "{{ item.metadata.name }}"
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+    state: absent
+  loop: "{{ orphaned_cms }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: orphaned_cms | length > 0
+  register: cleanup_results
+
+- name: Log cleanup results
+  ansible.builtin.debug:
+    msg: "Cleaned up {{ orphaned_cms | length }} orphaned state ConfigMap(s)"
+  when: orphaned_cms | length > 0

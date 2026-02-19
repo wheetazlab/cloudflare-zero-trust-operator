@@ -6,160 +6,216 @@
 #   - tenant_account_id: Account ID
 #   - tenant_tunnel_id: Default tunnel ID
 #   - tenant_defaults: Default values
+#   - operator_namespace: Operator namespace (default: cloudflare-zero-trust)
 
-- name: Extract IngressRoute metadata
-  ansible.builtin.set_fact:
-    ir_name: "{{ ingressroute.metadata.name }}"
-    ir_namespace: "{{ ingressroute.metadata.namespace }}"
-    ir_annotations: "{{ ingressroute.metadata.annotations }}"
-
-- name: Parse IngressRoute annotations
-  ansible.builtin.set_fact:
-    hostname: "{{ ir_annotations['cfzt.cloudflare.com/hostname'] | default('') }}"
-    tunnel_id: "{{ ir_annotations['cfzt.cloudflare.com/tunnelId'] | default(tenant_tunnel_id) }}"
-    origin_service: "{{ ir_annotations['cfzt.cloudflare.com/originService'] | default(tenant_defaults.originService | default('http://traefik.traefik.svc:80')) }}"
-    create_access_app: "{{ ir_annotations['cfzt.cloudflare.com/accessApp'] | default('false') | bool }}"
-    allow_groups: "{{ ir_annotations['cfzt.cloudflare.com/allowGroups'] | default('') }}"
-    allow_emails: "{{ ir_annotations['cfzt.cloudflare.com/allowEmails'] | default('') }}"
-    session_duration: "{{ ir_annotations['cfzt.cloudflare.com/sessionDuration'] | default(tenant_defaults.sessionDuration | default('24h')) }}"
-    create_service_token: "{{ ir_annotations['cfzt.cloudflare.com/serviceToken'] | default('false') | bool }}"
-    existing_app_id: "{{ ir_annotations['cfzt.cloudflare.com/accessAppId'] | default('') }}"
-    existing_policy_ids: "{{ ir_annotations['cfzt.cloudflare.com/accessPolicyIds'] | default('') }}"
-    existing_token_id: "{{ ir_annotations['cfzt.cloudflare.com/serviceTokenId'] | default('') }}"
-    existing_route_id: "{{ ir_annotations['cfzt.cloudflare.com/hostnameRouteId'] | default('') }}"
-
-- name: Validate hostname
-  ansible.builtin.fail:
-    msg: "IngressRoute {{ ir_namespace }}/{{ ir_name }} missing required annotation: cfzt.cloudflare.com/hostname"
-  when: hostname == ""
-
-- name: Display reconciliation details
-  ansible.builtin.debug:
-    msg: "Reconciling IngressRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
-
-# Step 1: Create/Update Hostname Route
-- name: Manage hostname route
+# Step 0: Check if reconciliation needed based on state
+- name: Check IngressRoute state
   include_role:
-    name: cloudflare_api
-    tasks_from: manage_hostname_route.yml
+    name: state_manager
+    tasks_from: check_state.yml
   vars:
-    cf_api_token: "{{ api_token }}"
-    cf_account_id: "{{ tenant_account_id }}"
-    cf_tunnel_id: "{{ tunnel_id }}"
-    cf_hostname: "{{ hostname }}"
-    cf_origin_service: "{{ origin_service }}"
-    cf_api_base: "{{ cloudflare_api_base }}"
+    ingressroute: "{{ ingressroute }}"
+    operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
 
-- name: Increment hostname route counter
-  ansible.builtin.set_fact:
-    count_hostname_routes: "{{ count_hostname_routes | int + 1 }}"
+- name: Skip reconciliation if no changes detected
+  ansible.builtin.debug:
+    msg: "Skipping {{ ingressroute.metadata.namespace }}/{{ ingressroute.metadata.name }} - no changes detected"
+  when: not needs_reconciliation
 
-# Step 2: Create/Update Access Application (if enabled)
-- name: Manage Access Application
+- name: Reconcile IngressRoute (changed or new)
+  when: needs_reconciliation
   block:
-    - name: Create/Update Access Application
+    - name: Extract IngressRoute metadata
+      ansible.builtin.set_fact:
+        ir_name: "{{ ingressroute.metadata.name }}"
+        ir_namespace: "{{ ingressroute.metadata.namespace }}"
+        ir_uid: "{{ ingressroute.metadata.uid }}"
+        ir_annotations: "{{ ingressroute.metadata.annotations }}"
+
+    - name: Parse IngressRoute annotations
+    - name: Parse IngressRoute annotations
+      ansible.builtin.set_fact:
+        hostname: "{{ ir_annotations['cfzt.cloudflare.com/hostname'] | default('') }}"
+        tunnel_id: "{{ ir_annotations['cfzt.cloudflare.com/tunnelId'] | default(tenant_tunnel_id) }}"
+        origin_service: "{{ ir_annotations['cfzt.cloudflare.com/originService'] | default(tenant_defaults.originService | default('http://traefik.traefik.svc:80')) }}"
+        create_access_app: "{{ ir_annotations['cfzt.cloudflare.com/accessApp'] | default('false') | bool }}"
+        allow_groups: "{{ ir_annotations['cfzt.cloudflare.com/allowGroups'] | default('') }}"
+        allow_emails: "{{ ir_annotations['cfzt.cloudflare.com/allowEmails'] | default('') }}"
+        session_duration: "{{ ir_annotations['cfzt.cloudflare.com/sessionDuration'] | default(tenant_defaults.sessionDuration | default('24h')) }}"
+        create_service_token: "{{ ir_annotations['cfzt.cloudflare.com/serviceToken'] | default('false') | bool }}"
+        existing_app_id: "{{ ir_annotations['cfzt.cloudflare.com/accessAppId'] | default('') }}"
+        existing_policy_ids: "{{ ir_annotations['cfzt.cloudflare.com/accessPolicyIds'] | default('') }}"
+        existing_token_id: "{{ ir_annotations['cfzt.cloudflare.com/serviceTokenId'] | default('') }}"
+        existing_route_id: "{{ ir_annotations['cfzt.cloudflare.com/hostnameRouteId'] | default('') }}"
+
+    - name: Initialize Cloudflare IDs dictionary
+      ansible.builtin.set_fact:
+        cloudflare_resource_ids: {}
+
+    - name: Validate hostname
+      ansible.builtin.fail:
+        msg: "IngressRoute {{ ir_namespace }}/{{ ir_name }} missing required annotation: cfzt.cloudflare.com/hostname"
+      when: hostname == ""
+
+    - name: Display reconciliation details
+      ansible.builtin.debug:
+        msg: "Reconciling IngressRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
+
+    # Step 1: Create/Update Hostname Route
+    - name: Manage hostname route
       include_role:
         name: cloudflare_api
-        tasks_from: manage_access_app.yml
+        tasks_from: manage_hostname_route.yml
       vars:
         cf_api_token: "{{ api_token }}"
         cf_account_id: "{{ tenant_account_id }}"
-        cf_app_name: "{{ ir_name }}"
-        cf_app_domain: "{{ hostname }}"
-        cf_app_id: "{{ existing_app_id }}"
-        cf_session_duration: "{{ session_duration }}"
+        cf_tunnel_id: "{{ tunnel_id }}"
+        cf_hostname: "{{ hostname }}"
+        cf_origin_service: "{{ origin_service }}"
         cf_api_base: "{{ cloudflare_api_base }}"
 
-    - name: Increment access app counter
+    - name: Store hostname route ID
       ansible.builtin.set_fact:
-        count_access_apps: "{{ count_access_apps | int + 1 }}"
+        cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'tunnel_id': tunnel_id, 'hostname': hostname}) }}"
 
-    # Step 3: Create/Update Access Policy
-    - name: Parse allow groups
+    - name: Increment hostname route counter
       ansible.builtin.set_fact:
-        allow_groups_list: "{{ allow_groups.split(',') | map('trim') | list }}"
-      when: allow_groups != ""
+        count_hostname_routes: "{{ count_hostname_routes | int + 1 }}"
 
-    - name: Parse allow emails
-      ansible.builtin.set_fact:
-        allow_emails_list: "{{ allow_emails.split(',') | map('trim') | list }}"
-      when: allow_emails != ""
+    # Step 2: Create/Update Access Application (if enabled)
+    - name: Manage Access Application
+      block:
+        - name: Create/Update Access Application
+          include_role:
+            name: cloudflare_api
+            tasks_from: manage_access_app.yml
+          vars:
+            cf_api_token: "{{ api_token }}"
+            cf_account_id: "{{ tenant_account_id }}"
+            cf_app_name: "{{ ir_name }}"
+            cf_app_domain: "{{ hostname }}"
+            cf_app_id: "{{ existing_app_id }}"
+            cf_session_duration: "{{ session_duration }}"
+            cf_api_base: "{{ cloudflare_api_base }}"
 
-    - name: Split existing policy IDs
-      ansible.builtin.set_fact:
-        existing_policy_list: "{{ existing_policy_ids.split(',') | map('trim') | list }}"
-      when: existing_policy_ids != ""
+        - name: Store access app ID
+          ansible.builtin.set_fact:
+            cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'access_app_id': access_app_result.app_id}) }}"
 
-    - name: Create/Update Access Policy
-      include_role:
-        name: cloudflare_api
-        tasks_from: manage_access_policy.yml
-      vars:
-        cf_api_token: "{{ api_token }}"
-        cf_account_id: "{{ tenant_account_id }}"
-        cf_app_id: "{{ access_app_result.app_id }}"
-        cf_policy_name: "{{ ir_name }}-allow-policy"
-        cf_allow_groups: "{{ allow_groups_list | default([]) }}"
-        cf_allow_emails: "{{ allow_emails_list | default([]) }}"
-        cf_policy_id: "{{ existing_policy_list[0] | default('') }}"
-        cf_api_base: "{{ cloudflare_api_base }}"
+        - name: Increment access app counter
+          ansible.builtin.set_fact:
+            count_access_apps: "{{ count_access_apps | int + 1 }}"
 
-    - name: Increment access policy counter
-      ansible.builtin.set_fact:
-        count_access_policies: "{{ count_access_policies | int + 1 }}"
+        # Step 3: Create/Update Access Policy
+        - name: Parse allow groups
+          ansible.builtin.set_fact:
+            allow_groups_list: "{{ allow_groups.split(',') | map('trim') | list }}"
+          when: allow_groups != ""
 
-    # Update IngressRoute with Access App and Policy IDs
-    - name: Patch IngressRoute with Access IDs
-      kubernetes.core.k8s:
-        state: patched
-        kind: IngressRoute
-        api_version: traefik.io/v1alpha1
-        name: "{{ ir_name }}"
-        namespace: "{{ ir_namespace }}"
-        definition:
-          metadata:
-            annotations:
-              cfzt.cloudflare.com/accessAppId: "{{ access_app_result.app_id }}"
-              cfzt.cloudflare.com/accessPolicyIds: "{{ access_policy_result.policy_id }}"
+        - name: Parse allow emails
+          ansible.builtin.set_fact:
+            allow_emails_list: "{{ allow_emails.split(',') | map('trim') | list }}"
+          when: allow_emails != ""
 
-  when: create_access_app
+        - name: Split existing policy IDs
+          ansible.builtin.set_fact:
+            existing_policy_list: "{{ existing_policy_ids.split(',') | map('trim') | list }}"
+          when: existing_policy_ids != ""
 
-# Step 4: Create Service Token (if enabled)
-- name: Manage Service Token
-  block:
-    - name: Create Service Token
-      include_role:
-        name: cloudflare_api
-        tasks_from: manage_service_token.yml
-      vars:
-        cf_api_token: "{{ api_token }}"
-        cf_account_id: "{{ tenant_account_id }}"
-        cf_token_name: "{{ ir_name }}-service-token"
-        cf_token_id: "{{ existing_token_id }}"
-        cf_api_base: "{{ cloudflare_api_base }}"
+        - name: Create/Update Access Policy
+          include_role:
+            name: cloudflare_api
+            tasks_from: manage_access_policy.yml
+          vars:
+            cf_api_token: "{{ api_token }}"
+            cf_account_id: "{{ tenant_account_id }}"
+            cf_app_id: "{{ access_app_result.app_id }}"
+            cf_policy_name: "{{ ir_name }}-allow-policy"
+            cf_allow_groups: "{{ allow_groups_list | default([]) }}"
+            cf_allow_emails: "{{ allow_emails_list | default([]) }}"
+            cf_policy_id: "{{ existing_policy_list[0] | default('') }}"
+            cf_api_base: "{{ cloudflare_api_base }}"
 
-    - name: Increment service token counter
-      ansible.builtin.set_fact:
-        count_service_tokens: "{{ count_service_tokens | int + 1 }}"
+        - name: Store access policy ID
+          ansible.builtin.set_fact:
+            cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'access_policy_id': access_policy_result.policy_id}) }}"
 
-    # Create K8s Secret with token credentials (only on creation)
-    - name: Create Kubernetes Secret for Service Token
-      kubernetes.core.k8s:
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: "{{ ir_name }}-cfzt-service-token"
+        - name: Increment access policy counter
+          ansible.builtin.set_fact:
+            count_access_policies: "{{ count_access_policies | int + 1 }}"
+
+        # Update IngressRoute with Access App and Policy IDs
+        - name: Patch IngressRoute with Access IDs
+          kubernetes.core.k8s:
+            state: patched
+            kind: IngressRoute
+            api_version: traefik.io/v1alpha1
+            name: "{{ ir_name }}"
             namespace: "{{ ir_namespace }}"
-          type: Opaque
-          stringData:
-            client_id: "{{ service_token_result.client_id }}"
-            client_secret: "{{ service_token_result.client_secret }}"
-      when: service_token_result.created
+            definition:
+              metadata:
+                annotations:
+                  cfzt.cloudflare.com/accessAppId: "{{ access_app_result.app_id }}"
+                  cfzt.cloudflare.com/accessPolicyIds: "{{ access_policy_result.policy_id }}"
 
-    # Update IngressRoute with Service Token ID and Secret name
-    - name: Patch IngressRoute with Service Token info
+      when: create_access_app
+
+    # Step 4: Create Service Token (if enabled)
+    - name: Manage Service Token
+      block:
+        - name: Create Service Token
+          include_role:
+            name: cloudflare_api
+            tasks_from: manage_service_token.yml
+          vars:
+            cf_api_token: "{{ api_token }}"
+            cf_account_id: "{{ tenant_account_id }}"
+            cf_token_name: "{{ ir_name }}-service-token"
+            cf_token_id: "{{ existing_token_id }}"
+            cf_api_base: "{{ cloudflare_api_base }}"
+
+        - name: Store service token ID
+          ansible.builtin.set_fact:
+            cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'service_token_id': service_token_result.token_id}) }}"
+
+        - name: Increment service token counter
+          ansible.builtin.set_fact:
+            count_service_tokens: "{{ count_service_tokens | int + 1 }}"
+
+        # Create K8s Secret with token credentials (only on creation)
+        - name: Create Kubernetes Secret for Service Token
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: "{{ ir_name }}-cfzt-service-token"
+                namespace: "{{ ir_namespace }}"
+              type: Opaque
+              stringData:
+                client_id: "{{ service_token_result.client_id }}"
+                client_secret: "{{ service_token_result.client_secret }}"
+          when: service_token_result.created
+
+        # Update IngressRoute with Service Token ID and Secret name
+        - name: Patch IngressRoute with Service Token info
+          kubernetes.core.k8s:
+            state: patched
+            kind: IngressRoute
+            api_version: traefik.io/v1alpha1
+            name: "{{ ir_name }}"
+            namespace: "{{ ir_namespace }}"
+            definition:
+              metadata:
+                annotations:
+                  cfzt.cloudflare.com/serviceTokenId: "{{ service_token_result.token_id }}"
+                  cfzt.cloudflare.com/serviceTokenSecretName: "{{ ir_name }}-cfzt-service-token"
+
+      when: create_service_token
+
+    # Final: Update IngressRoute with hostname route info
+    - name: Patch IngressRoute with hostname route info
       kubernetes.core.k8s:
         state: patched
         kind: IngressRoute
@@ -169,21 +225,19 @@
         definition:
           metadata:
             annotations:
-              cfzt.cloudflare.com/serviceTokenId: "{{ service_token_result.token_id }}"
-              cfzt.cloudflare.com/serviceTokenSecretName: "{{ ir_name }}-cfzt-service-token"
+              cfzt.cloudflare.com/hostnameRouteId: "{{ tunnel_id }}"
+              cfzt.cloudflare.com/lastReconcile: "{{ ansible_date_time.iso8601 }}"
 
-  when: create_service_token
-
-# Final: Update IngressRoute with hostname route info
-- name: Patch IngressRoute with hostname route info
-  kubernetes.core.k8s:
-    state: patched
-    kind: IngressRoute
-    api_version: traefik.io/v1alpha1
-    name: "{{ ir_name }}"
-    namespace: "{{ ir_namespace }}"
-    definition:
-      metadata:
-        annotations:
-          cfzt.cloudflare.com/hostnameRouteId: "{{ tunnel_id }}"
-          cfzt.cloudflare.com/lastReconcile: "{{ ansible_date_time.iso8601 }}"
+    # Update state ConfigMap with reconciliation results
+    - name: Update IngressRoute state
+      include_role:
+        name: state_manager
+        tasks_from: update_state.yml
+      vars:
+        state_configmap_name: "{{ state_configmap_name }}"
+        ir_name: "{{ ir_name }}"
+        ir_namespace: "{{ ir_namespace }}"
+        ir_uid: "{{ ir_uid }}"
+        current_annotation_hash: "{{ current_annotation_hash }}"
+        cloudflare_ids: "{{ cloudflare_resource_ids }}"
+        operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"

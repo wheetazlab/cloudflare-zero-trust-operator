@@ -1,0 +1,3 @@
+---
+# Main tasks file for state_manager role
+# This is typically not used directly - tasks are included via tasks_from

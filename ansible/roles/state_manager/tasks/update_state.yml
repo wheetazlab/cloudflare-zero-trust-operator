@@ -1,0 +1,46 @@
+---
+# Update state ConfigMap after successful reconciliation
+# Inputs:
+#   - state_configmap_name: Name of the state ConfigMap
+#   - ir_name: IngressRoute name
+#   - ir_namespace: IngressRoute namespace
+#   - ir_uid: IngressRoute UID
+#   - current_annotation_hash: Hash of current annotations
+#   - cloudflare_ids: Dict of Cloudflare resource IDs
+#   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
+
+- name: Get current timestamp
+  ansible.builtin.set_fact:
+    sync_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+- name: Create or update state ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ state_configmap_name }}"
+        namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+        labels:
+          app.kubernetes.io/name: cloudflare-zero-trust-operator
+          app.kubernetes.io/component: state-tracker
+          cfzt.cloudflare.com/ingressroute-namespace: "{{ ir_namespace }}"
+          cfzt.cloudflare.com/ingressroute-name: "{{ ir_name }}"
+        annotations:
+          cfzt.cloudflare.com/ingressroute-uid: "{{ ir_uid }}"
+      data:
+        annotation_hash: "{{ current_annotation_hash }}"
+        cloudflare_ids: "{{ cloudflare_ids | to_json }}"
+        last_sync_time: "{{ sync_timestamp }}"
+        ingressroute_namespace: "{{ ir_namespace }}"
+        ingressroute_name: "{{ ir_name }}"
+  register: state_cm_update
+
+- name: Debug state update
+  ansible.builtin.debug:
+    msg: |
+      Updated state ConfigMap: {{ state_configmap_name }}
+      Annotation hash: {{ current_annotation_hash }}
+      Sync time: {{ sync_timestamp }}
+    verbosity: 1

@@ -31,6 +31,7 @@
   vars:
     watch_namespaces: "{{ lookup('env', 'WATCH_NAMESPACES') | default('', true) }}"
     cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
+    operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
     
   tasks:
     - name: Get all CloudflareZeroTrustTenant resources
@@ -53,3 +54,11 @@
         loop_var: tenant
         label: "{{ tenant.metadata.namespace }}/{{ tenant.metadata.name }}"
       when: cfzt_tenants is defined and cfzt_tenants | length > 0
+
+    - name: Cleanup orphaned state ConfigMaps
+      include_role:
+        name: state_manager
+        tasks_from: cleanup_orphaned.yml
+      vars:
+        cfzt_ingressroutes: "{{ cfzt_ingressroutes | default([]) }}"
+        operator_namespace: "{{ operator_namespace }}"

@@ -1,3 +1,4 @@
+<!-- markdownlint-disable -->
 # Architecture
 
 Complete architecture documentation for the Cloudflare Zero Trust Operator, from build to runtime.

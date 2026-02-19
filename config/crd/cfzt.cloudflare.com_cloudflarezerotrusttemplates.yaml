@@ -1,0 +1,209 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudflarezerotrusttemplates.cfzt.cloudflare.com
+spec:
+  group: cfzt.cloudflare.com
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                # Optional tenant reference - can be overridden per IngressRoute
+                tenantRef:
+                  type: string
+                  description: "Name of CloudflareZeroTrustTenant to use (optional)"
+                
+                # Origin service settings
+                originService:
+                  type: object
+                  properties:
+                    url:
+                      type: string
+                      description: "Default origin service URL (e.g., https://traefik.traefik.svc:443)"
+                    httpRedirect:
+                      type: boolean
+                      default: true
+                      description: "Automatically redirect HTTP to HTTPS at edge"
+                    originTLS:
+                      type: object
+                      properties:
+                        noTLSVerify:
+                          type: boolean
+                          default: false
+                          description: "Disable TLS verification (useful for self-signed certs)"
+                        originServerName:
+                          type: string
+                          description: "Custom SNI hostname for TLS handshake"
+                        caPool:
+                          type: string
+                          description: "Path to CA certificate file"
+                        tlsTimeout:
+                          type: integer
+                          minimum: 1
+                          maximum: 300
+                          default: 10
+                          description: "TLS handshake timeout in seconds"
+                        http2Origin:
+                          type: boolean
+                          default: false
+                          description: "Use HTTP/2 for origin connection"
+                        matchSNIToHost:
+                          type: boolean
+                          default: false
+                          description: "Match SNI to Host header automatically"
+                
+                # Access Application configuration
+                accessApplication:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Create Cloudflare Access Application"
+                    sessionDuration:
+                      type: string
+                      default: "24h"
+                      description: "Session duration (e.g., 24h, 8h, 30m)"
+                    
+                    # Reference existing policies instead of creating them
+                    existingPolicyIds:
+                      type: array
+                      items:
+                        type: string
+                      description: "List of existing Access Policy IDs to attach (operator won't create policies)"
+                    
+                    # Access Application settings from Cloudflare API
+                    autoRedirectToIdentity:
+                      type: boolean
+                      default: false
+                      description: "Automatically redirect to IdP"
+                    enableBindingCookie:
+                      type: boolean
+                      default: false
+                      description: "Enable binding cookie"
+                    httpOnlyCookieAttribute:
+                      type: boolean
+                      default: true
+                      description: "HTTP only cookie attribute"
+                    sameSiteCookieAttribute:
+                      type: string
+                      enum: ["none", "lax", "strict"]
+                      default: "lax"
+                      description: "SameSite cookie attribute"
+                    logoUrl:
+                      type: string
+                      description: "URL to application logo"
+                    skipInterstitial:
+                      type: boolean
+                      default: false
+                      description: "Skip the interstitial page"
+                    appLauncherVisible:
+                      type: boolean
+                      default: true
+                      description: "Show in App Launcher"
+                    serviceAuth401Redirect:
+                      type: boolean
+                      default: false
+                      description: "Return 401 status code instead of redirect for service authentication"
+                    customDenyMessage:
+                      type: string
+                      description: "Custom message for denied access"
+                    customDenyUrl:
+                      type: string
+                      description: "Custom URL for denied access"
+                    customNonIdentityDenyUrl:
+                      type: string
+                      description: "Custom URL for non-identity denied access"
+                    
+                    # Policy creation (when not using existingPolicyIds)
+                    # Kept for backward compatibility
+                    allowEmails:
+                      type: array
+                      items:
+                        type: string
+                      description: "Email addresses to allow (creates simple policy)"
+                    allowGroups:
+                      type: array
+                      items:
+                        type: string
+                      description: "Access Group names to allow (creates simple policy)"
+                
+                # Service Token configuration
+                serviceToken:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Create Cloudflare service token for machine-to-machine auth"
+                    duration:
+                      type: string
+                      default: "8760h"
+                      description: "Service token lifetime (e.g., 8760h = 1 year)"
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  description: "Last observed generation of the template"
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                usedByIngressRoutes:
+                  type: array
+                  items:
+                    type: string
+                  description: "List of IngressRoutes using this template"
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantRef
+        - name: Access App
+          type: boolean
+          jsonPath: .spec.accessApplication.enabled
+        - name: Service Token
+          type: boolean
+          jsonPath: .spec.serviceToken.enabled
+        - name: Used By
+          type: integer
+          jsonPath: .status.usedByIngressRoutes
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: cloudflarezerotrusttemplates
+    singular: cloudflarezerotrusttemplate
+    kind: CloudflareZeroTrustTemplate
+    shortNames:
+      - cfzttemplate
+      - cfztt

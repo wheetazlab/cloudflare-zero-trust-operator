@@ -8,6 +8,18 @@
 #   - cf_app_id: (optional) Existing application ID for updates
 #   - cf_session_duration: Session duration (default: 24h)
 #   - cf_api_base: Cloudflare API base URL
+# Optional variables from template:
+#   - cf_auto_redirect_to_identity: Auto-redirect to IdP (default: false)
+#   - cf_enable_binding_cookie: Enable binding cookie (default: false)
+#   - cf_http_only_cookie_attribute: HTTP only cookie (default: true)
+#   - cf_same_site_cookie_attribute: SameSite attribute (default: lax)
+#   - cf_logo_url: Application logo URL
+#   - cf_skip_interstitial: Skip interstitial page (default: false)
+#   - cf_app_launcher_visible: Show in app launcher (default: true)
+#   - cf_service_auth_401_redirect: Return 401 instead of redirect (default: false)
+#   - cf_custom_deny_message: Custom deny message
+#   - cf_custom_deny_url: Custom deny URL
+#   - cf_custom_non_identity_deny_url: Custom non-identity deny URL
 
 - name: Set default session duration
   ansible.builtin.set_fact:
@@ -20,13 +32,29 @@
       domain: "{{ cf_app_domain }}"
       type: "self_hosted"
       session_duration: "{{ session_duration }}"
-      auto_redirect_to_identity: false
-      enable_binding_cookie: false
-      http_only_cookie_attribute: true
-      same_site_cookie_attribute: "lax"
-      logo_url: ""
-      skip_interstitial: false
-      app_launcher_visible: true
+      auto_redirect_to_identity: "{{ cf_auto_redirect_to_identity | default(false) }}"
+      enable_binding_cookie: "{{ cf_enable_binding_cookie | default(false) }}"
+      http_only_cookie_attribute: "{{ cf_http_only_cookie_attribute | default(true) }}"
+      same_site_cookie_attribute: "{{ cf_same_site_cookie_attribute | default('lax') }}"
+      logo_url: "{{ cf_logo_url | default('') }}"
+      skip_interstitial: "{{ cf_skip_interstitial | default(false) }}"
+      app_launcher_visible: "{{ cf_app_launcher_visible | default(true) }}"
+      service_auth_401_redirect: "{{ cf_service_auth_401_redirect | default(false) }}"
+
+- name: Add custom deny message if provided
+  ansible.builtin.set_fact:
+    access_app_payload: "{{ access_app_payload | combine({'custom_deny_message': cf_custom_deny_message}) }}"
+  when: cf_custom_deny_message is defined and cf_custom_deny_message | length > 0
+
+- name: Add custom deny URL if provided
+  ansible.builtin.set_fact:
+    access_app_payload: "{{ access_app_payload | combine({'custom_deny_url': cf_custom_deny_url}) }}"
+  when: cf_custom_deny_url is defined and cf_custom_deny_url | length > 0
+
+- name: Add custom non-identity deny URL if provided
+  ansible.builtin.set_fact:
+    access_app_payload: "{{ access_app_payload | combine({'custom_non_identity_deny_url': cf_custom_non_identity_deny_url}) }}"
+  when: cf_custom_non_identity_deny_url is defined and cf_custom_non_identity_deny_url | length > 0
 
 - name: Create Access Application
   ansible.builtin.uri:

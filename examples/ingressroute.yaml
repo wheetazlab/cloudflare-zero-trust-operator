@@ -154,3 +154,149 @@ spec:
         - name: rate-limit
   tls:
     secretName: app-tls
+
+---
+###############################################################################
+# TLS Configuration Examples - Origin TLS Settings
+###############################################################################
+
+# Example: HTTPS backend with self-signed certificate
+# Use noTLSVerify to skip certificate validation
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: https-self-signed-backend
+  namespace: default
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/hostname: "secure-app.example.com"
+    
+    # Override origin service to use HTTPS
+    cfzt.cloudflare.com/originService: "https://traefik.traefik.svc.cluster.local:443"
+    
+    # Skip TLS verification for self-signed certificates
+    cfzt.cloudflare.com/no-tls-verify: "true"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`secure-app.example.com`)
+      kind: Rule
+      services:
+        - name: secure-app
+          port: 8443
+  tls:
+    secretName: secure-app-tls
+
+---
+# Example: HTTPS backend with custom SNI hostname and timeout
+# Useful when the origin server expects a specific hostname in SNI
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: custom-sni-backend
+  namespace: default
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/hostname: "custom-sni.example.com"
+    
+    # Origin service uses HTTPS
+    cfzt.cloudflare.com/originService: "https://backend.backend-namespace.svc:8443"
+    
+    # Set custom SNI hostname for TLS handshake
+    cfzt.cloudflare.com/origin-server-name: "backend.internal.corp"
+    
+    # Increase TLS timeout for slow backends (in seconds, 1-300)
+    cfzt.cloudflare.com/tls-timeout: "30"
+    
+    # Match SNI to the Host header
+    cfzt.cloudflare.com/match-sni-to-host: "true"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`custom-sni.example.com`)
+      kind: Rule
+      services:
+        - name: backend
+          namespace: backend-namespace
+          port: 8443
+  tls:
+    secretName: backend-tls
+
+---
+# Example: HTTP/2 backend with disabled HTTP redirect
+# Use HTTP/2 for better performance and disable automatic HTTP to HTTPS redirect
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: http2-backend
+  namespace: default
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/hostname: "http2-app.example.com"
+    
+    # Origin service uses HTTPS
+    cfzt.cloudflare.com/originService: "https://grpc-service.grpc-namespace.svc:443"
+    
+    # Enable HTTP/2 origin connection for gRPC or performance
+    cfzt.cloudflare.com/http2-origin: "true"
+    
+    # Disable automatic HTTP to HTTPS redirect (allow both protocols)
+    cfzt.cloudflare.com/http-redirect: "false"
+    
+    # Skip TLS verification if needed
+    cfzt.cloudflare.com/no-tls-verify: "true"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`http2-app.example.com`)
+      kind: Rule
+      services:
+        - name: grpc-service
+          namespace: grpc-namespace
+          port: 443
+  tls:
+    secretName: grpc-tls
+
+---
+# Example: Production HTTPS backend with CA pool
+# Most secure configuration with custom CA certificate validation
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: production-https-backend
+  namespace: production
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/hostname: "prod-app.example.com"
+    
+    # Origin service uses HTTPS
+    cfzt.cloudflare.com/originService: "https://prod-backend.production.svc:8443"
+    
+    # Path to CA certificate for validation (must be accessible by cloudflared)
+    cfzt.cloudflare.com/ca-pool: "/etc/cloudflared/certs/ca.pem"
+    
+    # Set appropriate timeout for production workloads
+    cfzt.cloudflare.com/tls-timeout: "15"
+    
+    # Use Access Application for additional security
+    cfzt.cloudflare.com/accessApp: "true"
+    cfzt.cloudflare.com/allowGroups: "Production-Access"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`prod-app.example.com`)
+      kind: Rule
+      services:
+        - name: prod-backend
+          namespace: production
+          port: 8443
+  tls:
+    secretName: prod-backend-tls

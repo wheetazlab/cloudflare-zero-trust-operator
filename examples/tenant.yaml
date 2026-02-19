@@ -23,8 +23,39 @@ spec:
   
   # Default values for managed resources
   defaults:
+    # Session duration for Access Applications
     sessionDuration: "24h"
-    originService: "http://traefik.traefik.svc:80"
+    
+    # Default origin service URL
+    # Scheme (http:// or https://) determines service type
+    originService: "https://traefik.traefik.svc.cluster.local:443"
+    
+    # Optional: HTTP Host header to send to origin
+    # httpHostHeader: "myapp.internal"
+    
+    # Enable HTTP to HTTPS redirect (default: true)
+    httpRedirect: true
+    
+    # Origin TLS settings (for HTTPS origins)
+    originTLS:
+      # Disable TLS verification (useful for self-signed certs)
+      noTLSVerify: true
+      
+      # Hostname cloudflared should expect from origin certificate (SNI)
+      # If not set, uses the origin service hostname
+      # originServerName: "traefik.traefik.svc.cluster.local"
+      
+      # Path to CA certificate for origin (if not Cloudflare-signed)
+      # caPool: "/path/to/ca.pem"
+      
+      # Timeout for TLS handshake to origin (seconds)
+      tlsTimeout: 10
+      
+      # Use HTTP/2 to origin (requires HTTPS)
+      http2Origin: false
+      
+      # Automatically set SNI to match incoming request hostname
+      matchSNIToHost: false
 
 ---
 # Example Secret for Cloudflare API token

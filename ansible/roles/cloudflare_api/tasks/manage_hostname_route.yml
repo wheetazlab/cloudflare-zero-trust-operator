@@ -7,6 +7,14 @@
 #   - cf_hostname: Hostname to configure
 #   - cf_origin_service: Origin service URL
 #   - cf_api_base: Cloudflare API base URL
+#   - cf_origin_uses_https: Whether origin service uses HTTPS (bool)
+#   - cf_http_redirect: Enable HTTP to HTTPS redirect (bool, default: true)
+#   - cf_no_tls_verify: Skip TLS verification for HTTPS origins (bool, default: false)
+#   - cf_origin_server_name: SNI hostname for TLS (string, optional)
+#   - cf_ca_pool: Path to CA certificate file (string, optional)
+#   - cf_tls_timeout: TLS handshake timeout in seconds (int, default: 10)
+#   - cf_http2_origin: Use HTTP/2 for origin connection (bool, default: false)
+#   - cf_match_sni_to_host: Match SNI to Host header (bool, default: false)
 
 - name: Get current tunnel configuration
   ansible.builtin.uri:
@@ -32,6 +40,60 @@
     hostname_rule:
       hostname: "{{ cf_hostname }}"
       service: "{{ cf_origin_service }}"
+
+- name: Build originRequest configuration for HTTPS origins
+  ansible.builtin.set_fact:
+    origin_request_config: {}
+  when: cf_origin_uses_https | default(false)
+
+- name: Add httpHostHeader to originRequest (use hostname)
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | default({}) | combine({'httpHostHeader': cf_hostname}) }}"
+  when: cf_origin_uses_https | default(false)
+
+- name: Add HTTP redirect setting to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'disableChunkedEncoding': false, 'noTLSVerify': cf_no_tls_verify | default(false)}) }}"
+  when: cf_origin_uses_https | default(false)
+
+- name: Add originServerName to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'originServerName': cf_origin_server_name}) }}"
+  when:
+    - cf_origin_uses_https | default(false)
+    - cf_origin_server_name is defined
+    - cf_origin_server_name | length > 0
+
+- name: Add caPool to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'caPool': cf_ca_pool}) }}"
+  when:
+    - cf_origin_uses_https | default(false)
+    - cf_ca_pool is defined
+    - cf_ca_pool | length > 0
+
+- name: Add tlsTimeout to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'tlsTimeout': (cf_tls_timeout | default(10) | string) + 's'}) }}"
+  when: cf_origin_uses_https | default(false)
+
+- name: Add http2Origin to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'http2Origin': cf_http2_origin | default(false)}) }}"
+  when: cf_origin_uses_https | default(false)
+
+- name: Add TCP keepalive settings to originRequest
+  ansible.builtin.set_fact:
+    origin_request_config: "{{ origin_request_config | combine({'tcpKeepAlive': '30s', 'keepAliveConnections': 100}) }}"
+  when: cf_origin_uses_https | default(false)
+
+- name: Add originRequest to hostname rule
+  ansible.builtin.set_fact:
+    hostname_rule: "{{ hostname_rule | combine({'originRequest': origin_request_config}) }}"
+  when:
+    - cf_origin_uses_https | default(false)
+    - origin_request_config is defined
+    - origin_request_config | length > 0
 
 - name: Remove existing rule for this hostname
   ansible.builtin.set_fact:

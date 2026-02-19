@@ -1,0 +1,200 @@
+---
+# Default Template - Public tunnel route with HTTPS origin
+# This is used when no template is specified in IngressRoute
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: default
+  namespace: default
+spec:
+  # Origin service configuration
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true  # Self-signed certs in cluster
+      tlsTimeout: 10
+      http2Origin: false
+  
+  # No Access Application - public route
+  accessApplication:
+    enabled: false
+  
+  # No service token
+  serviceToken:
+    enabled: false
+
+---
+# Secure Internal App - Uses existing Azure AD policy
+# For internal applications requiring authentication
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: secure-internal-app
+  namespace: default
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 10
+  
+  # Create Access Application with existing policies
+  accessApplication:
+    enabled: true
+    sessionDuration: "24h"
+    
+    # Reference your existing "ADAUTH" policy or other policies
+    # Get policy IDs from Cloudflare UI or API
+    existingPolicyIds:
+      - "73badfbd-c825-4bf3-a543-e2882627969d"  # Example: ADAUTH policy
+    
+    # Application settings
+    autoRedirectToIdentity: false
+    appLauncherVisible: true
+    skipInterstitial: false
+    httpOnlyCookieAttribute: true
+    sameSiteCookieAttribute: "lax"
+  
+  serviceToken:
+    enabled: false
+
+---
+# gRPC Backend - HTTP/2 enabled
+# For gRPC services or applications requiring HTTP/2
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: grpc-backend
+  namespace: default
+spec:
+  originService:
+    url: "https://grpc-service.grpc-namespace.svc:443"
+    httpRedirect: false  # Don't redirect for gRPC
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 30
+      http2Origin: true  # Enable HTTP/2 for gRPC
+  
+  accessApplication:
+    enabled: false
+  
+  serviceToken:
+    enabled: false
+
+---
+# Public API with Service Token
+# For machine-to-machine API authentication
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: api-with-service-token
+  namespace: default
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: false  # APIs typically don't need redirect
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 15
+  
+  # Create Access Application for service token
+  accessApplication:
+    enabled: true
+    sessionDuration: "1h"  # Short session for APIs
+    serviceAuth401Redirect: true  # Return 401 instead of redirect
+    appLauncherVisible: false  # Don't show in app launcher
+  
+  # Create service token for authentication
+  serviceToken:
+    enabled: true
+    duration: "8760h"  # 1 year
+
+---
+# Secure Admin Panel - Short session, strict security
+# For administrative interfaces requiring high security
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: admin-panel
+  namespace: default
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 10
+  
+  accessApplication:
+    enabled: true
+    sessionDuration: "4h"  # Shorter session for admin
+    
+    # Reference existing admin policy
+    existingPolicyIds:
+      - "your-admin-policy-id-here"
+    
+    autoRedirectToIdentity: true  # Immediate redirect to IdP
+    appLauncherVisible: true
+    skipInterstitial: false
+    httpOnlyCookieAttribute: true
+    sameSiteCookieAttribute: "strict"  # Strict for admin
+  
+  serviceToken:
+    enabled: false
+
+---
+# Simple Email Allow - Creates basic policy (backward compatible)
+# For quick setup when you don't have pre-existing policies
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: simple-email-allow
+  namespace: default
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 10
+  
+  accessApplication:
+    enabled: true
+    sessionDuration: "24h"
+    
+    # Operator will create a simple policy with these emails
+    allowEmails:
+      - "user@example.com"
+      - "admin@example.com"
+    
+    appLauncherVisible: true
+    skipInterstitial: false
+  
+  serviceToken:
+    enabled: false
+
+---
+# Custom Origin - Specific backend service
+# For applications with custom origin requirements
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: custom-origin
+  namespace: default
+spec:
+  originService:
+    url: "https://custom-backend.custom-namespace.svc:8443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: false  # Verify TLS if using proper certs
+      originServerName: "backend.internal.corp"  # Custom SNI
+      tlsTimeout: 15
+      http2Origin: false
+  
+  accessApplication:
+    enabled: false
+  
+  serviceToken:
+    enabled: false

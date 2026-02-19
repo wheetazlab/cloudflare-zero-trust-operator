@@ -317,7 +317,17 @@ spec:
 **Per-Tenant Configuration** (in CloudflareZeroTrustTenant CR):
 - `spec.logLevel`: Override global log level for this tenant's reconciliation
 - `spec.defaults.sessionDuration`: Default Access Application session duration
-- `spec.defaults.originService`: Default origin service URL
+- `spec.defaults.originService`: Default origin service URL (auto-detects HTTP/HTTPS from URL scheme)
+- `spec.defaults.httpRedirect`: Automatically redirect HTTP to HTTPS at Cloudflare edge (default: true)
+- `spec.defaults.originTLS`: TLS configuration for HTTPS origin connections
+  - `noTLSVerify`: Skip TLS certificate verification (default: false) - useful for self-signed certificates
+  - `originServerName`: Custom SNI hostname for TLS handshake (optional)
+  - `caPool`: Path to CA certificate file for validation (optional)
+  - `tlsTimeout`: TLS handshake timeout in seconds, 1-300 (default: 10)
+  - `http2Origin`: Use HTTP/2 for origin connection (default: false) - useful for gRPC backends
+  - `matchSNIToHost`: Match SNI to Host header automatically (default: false)
+
+**Note**: TLS settings can be overridden per-IngressRoute using annotations (e.g., `cfzt.cloudflare.com/no-tls-verify`, `cfzt.cloudflare.com/tls-timeout`, etc.)
 
 **Operator Pod Configuration** (via CloudflareZeroTrustOperatorConfig CR):
 - Dynamically controls operator pod scheduling and resources without redeployment

@@ -110,8 +110,8 @@ flowchart TD
     USER --> PERMS[Set Permissions]
     PERMS --> IMG([Container Image])
     
-    style START fill:#90EE90
-    style IMG fill:#87CEEB
+    style START fill:#4CAF50
+    style IMG fill:#2196F3
 ```
 
 ### Build Steps Detail
@@ -208,10 +208,10 @@ graph TB
         POD1 -.updates status.-> TENANT1
     end
     
-    style CRD fill:#FFB6C1
-    style CR1 fill:#FFB6C1
-    style CRB1 fill:#FFB6C1
-    style POD1 fill:#90EE90
+    style CRD fill:#E91E63
+    style CR1 fill:#E91E63
+    style CRB1 fill:#E91E63
+    style POD1 fill:#4CAF50
 ```
 
 ### Deployment Components
@@ -614,8 +614,8 @@ flowchart TD
     UPDATE_STATUS --> SLEEP[Sleep POLL_INTERVAL_SECONDS]
     SLEEP --> START
     
-    style START fill:#90EE90
-    style SLEEP fill:#FFB6C1
+    style START fill:#4CAF50
+    style SLEEP fill:#E91E63
 ```
 
 ### State Management
@@ -681,10 +681,10 @@ graph TB
         APP -.reads.-> GEN_SECRETS
     end
     
-    style USER_SECRET fill:#FFB6C1
-    style GEN_SECRETS fill:#FFB6C1
-    style API_TOKEN fill:#FF6B6B
-    style CLIENT_SECRET fill:#FF6B6B
+    style USER_SECRET fill:#E91E63
+    style GEN_SECRETS fill:#E91E63
+    style API_TOKEN fill:#E53935
+    style CLIENT_SECRET fill:#E53935
 ```
 
 **Security Boundaries**:
@@ -744,10 +744,10 @@ graph TB
     SA --> W3
     SA --> W4
     
-    style X1 fill:#FF6B6B
-    style X2 fill:#FF6B6B
-    style X3 fill:#FF6B6B
-    style X4 fill:#FF6B6B
+    style X1 fill:#E53935
+    style X2 fill:#E53935
+    style X3 fill:#E53935
+    style X4 fill:#E53935
 ```
 
 **Principle of Least Privilege**:
@@ -803,7 +803,7 @@ graph LR
     OP -->|TLS 1.2+| CF
     OP -.-x|No Access| OTHER
     
-    style OTHER fill:#FF6B6B
+    style OTHER fill:#E53935
 ```
 
 **Network Policy Recommendations**:
@@ -926,11 +926,11 @@ graph TB
     WARN1 --> SUCCESS
     WARN2 --> SUCCESS
     
-    style FAIL1 fill:#FF6B6B
-    style FAIL2 fill:#FF6B6B
-    style WARN1 fill:#FFB6C1
-    style WARN2 fill:#FFB6C1
-    style SUCCESS fill:#90EE90
+    style FAIL1 fill:#E53935
+    style FAIL2 fill:#E53935
+    style WARN1 fill:#E91E63
+    style WARN2 fill:#E91E63
+    style SUCCESS fill:#4CAF50
 ```
 
 **Health Check Script**: `scripts/health-check.sh`

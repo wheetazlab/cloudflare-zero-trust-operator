@@ -213,10 +213,10 @@ flowchart TD
     SKIP --> CONTINUE
     SKIP_UPDATE --> CONTINUE
     
-    style START fill:#90EE90
-    style APPLY fill:#FFD700
-    style UPDATE_STATUS fill:#87CEEB
-    style CONTINUE fill:#90EE90
+    style START fill:#4CAF50
+    style APPLY fill:#FF9800
+    style UPDATE_STATUS fill:#2196F3
+    style CONTINUE fill:#4CAF50
 ```
 
 **Self-Configuration Steps**:
@@ -403,13 +403,13 @@ flowchart TD
     RETURN --> SLEEP[Sleep POLL_INTERVAL_SECONDS]
     SLEEP --> TRIGGER
     
-    style START fill:#90EE90
-    style PLAY1 fill:#87CEEB
-    style PLAY2 fill:#87CEEB
-    style OP_CONFIG fill:#DDA0DD
-    style TENANT_LOOP fill:#FFD700
-    style CLEANUP fill:#FFA07A
-    style SLEEP fill:#FFB6C1
+    style START fill:#4CAF50
+    style PLAY1 fill:#2196F3
+    style PLAY2 fill:#2196F3
+    style OP_CONFIG fill:#9C27B0
+    style TENANT_LOOP fill:#FF9800
+    style CLEANUP fill:#FF5722
+    style SLEEP fill:#E91E63
 ```
 
 ## Role Details
@@ -445,9 +445,9 @@ flowchart TD
     RECURSE --> START
     RECURSE2 --> START
     
-    style START fill:#90EE90
-    style RECURSE fill:#FFB6C1
-    style RECURSE2 fill:#FFB6C1
+    style START fill:#4CAF50
+    style RECURSE fill:#E91E63
+    style RECURSE2 fill:#E91E63
 ```
 
 **Key Tasks**:
@@ -483,8 +483,8 @@ flowchart TD
     
     LOOP --> END
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **Output**: 
@@ -526,8 +526,8 @@ flowchart TD
     
     COUNT --> END([Done])
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **Output**:
@@ -579,10 +579,10 @@ flowchart TD
     NEED --> END([Done])
     SKIP --> END
     
-    style START fill:#90EE90
-    style NEED fill:#FFD700
-    style SKIP fill:#87CEEB
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style NEED fill:#FF9800
+    style SKIP fill:#2196F3
+    style END fill:#2196F3
 ```
 
 **Outputs**:
@@ -606,8 +606,8 @@ flowchart TD
     
     LABELS --> END([Done])
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **Inputs**:
@@ -636,9 +636,9 @@ flowchart TD
     LOG_NONE --> END([Done])
     LOG_CLEANUP --> END
     
-    style START fill:#90EE90
-    style DELETE fill:#FF6B6B
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style DELETE fill:#E53935
+    style END fill:#2196F3
 ```
 
 **When called**: After all tenants reconciled in each cycle
@@ -682,9 +682,9 @@ flowchart TD
     
     UPDATE_STATUS --> END([Done])
     
-    style START fill:#90EE90
-    style IR_LOOP fill:#FFD700
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style IR_LOOP fill:#FF9800
+    style END fill:#2196F3
 ```
 
 **Key Logic**:
@@ -773,14 +773,14 @@ flowchart TD
     
     STORE_STATE --> END
     
-    style START fill:#90EE90
-    style NEEDS fill:#FFD700
-    style SKIP fill:#87CEEB
-    style CHECK_ACCESS fill:#FFD700
-    style CHECK_TOKEN fill:#FFD700
-    style CREATE_SECRET fill:#FFD700
-    style UPDATE_STATE fill:#FFA07A
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style NEEDS fill:#FF9800
+    style SKIP fill:#2196F3
+    style CHECK_ACCESS fill:#FF9800
+    style CHECK_TOKEN fill:#FF9800
+    style CREATE_SECRET fill:#FF9800
+    style UPDATE_STATE fill:#FF5722
+    style END fill:#2196F3
 ```
 
 **Detailed Steps**:
@@ -851,8 +851,8 @@ flowchart TD
     
     LOG --> END([Done])
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **Status Fields Updated**:
@@ -914,8 +914,8 @@ flowchart TD
     RESULT --> LOG[Debug: Log result]
     LOG --> END([Done])
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **API Call**:
@@ -957,9 +957,9 @@ flowchart TD
     
     LOG --> END([Done])
     
-    style START fill:#90EE90
-    style CHECK fill:#FFD700
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style CHECK fill:#FF9800
+    style END fill:#2196F3
 ```
 
 **API Calls**:
@@ -1005,10 +1005,10 @@ flowchart TD
     
     LOG --> END([Done])
     
-    style START fill:#90EE90
-    style CHECK_EMPTY fill:#FFD700
-    style CHECK_ID fill:#FFD700
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style CHECK_EMPTY fill:#FF9800
+    style CHECK_ID fill:#FF9800
+    style END fill:#2196F3
 ```
 
 **Policy Structure**:
@@ -1051,9 +1051,9 @@ flowchart TD
     
     LOG --> END([Done])
     
-    style START fill:#90EE90
-    style CHECK fill:#FFD700
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style CHECK fill:#FF9800
+    style END fill:#2196F3
 ```
 
 **API Call**:
@@ -1096,8 +1096,8 @@ flowchart TD
     
     RESULT --> END([Done])
     
-    style START fill:#90EE90
-    style END fill:#87CEEB
+    style START fill:#4CAF50
+    style END fill:#2196F3
 ```
 
 **Deletion Order** (important for dependencies):
@@ -1215,11 +1215,11 @@ flowchart TD
     LOG_FAIL --> SLEEP[Sleep interval]
     SLEEP --> RETRY_LOOP[Retry next cycle]
     
-    style ERROR fill:#FF6B6B
-    style FAIL fill:#FF6B6B
-    style STOP fill:#FF6B6B
-    style CONTINUE fill:#90EE90
-    style RETRY_LOOP fill:#FFB6C1
+    style ERROR fill:#E53935
+    style FAIL fill:#E53935
+    style STOP fill:#E53935
+    style CONTINUE fill:#4CAF50
+    style RETRY_LOOP fill:#E91E63
 ```
 
 ### Retry and Backoff Strategy

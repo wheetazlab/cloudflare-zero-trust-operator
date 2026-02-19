@@ -1,0 +1,193 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudflarezerotrustoperatorconfigs.cfzt.cloudflare.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+spec:
+  group: cfzt.cloudflare.com
+  names:
+    kind: CloudflareZeroTrustOperatorConfig
+    listKind: CloudflareZeroTrustOperatorConfigList
+    plural: cloudflarezerotrustoperatorconfigs
+    shortNames:
+      - cfztconfig
+      - operatorconfig
+    singular: cloudflarezerotrustoperatorconfig
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: CloudflareZeroTrustOperatorConfig configures the operator deployment pod scheduling and resources
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                replicas:
+                  type: integer
+                  description: Number of operator pod replicas
+                  default: 1
+                  minimum: 1
+                  maximum: 10
+                resources:
+                  type: object
+                  description: Resource requests and limits for operator pod
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          description: CPU request
+                          default: "100m"
+                          pattern: '^[0-9]+m?$'
+                        memory:
+                          type: string
+                          description: Memory request
+                          default: "256Mi"
+                          pattern: '^[0-9]+(Mi|Gi|M|G)$'
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          description: CPU limit
+                          default: "500m"
+                          pattern: '^[0-9]+m?$'
+                        memory:
+                          type: string
+                          description: Memory limit
+                          default: "512Mi"
+                          pattern: '^[0-9]+(Mi|Gi|M|G)$'
+                affinity:
+                  type: object
+                  description: Pod affinity and anti-affinity rules
+                  x-kubernetes-preserve-unknown-fields: true
+                nodeSelector:
+                  type: object
+                  description: Node selector for pod placement
+                  additionalProperties:
+                    type: string
+                tolerations:
+                  type: array
+                  description: Pod tolerations for taints
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                imagePullPolicy:
+                  type: string
+                  description: Image pull policy for operator container
+                  default: "Always"
+                  enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                environmentVariables:
+                  type: object
+                  description: Additional environment variables for operator pod
+                  properties:
+                    pollIntervalSeconds:
+                      type: integer
+                      description: Interval between reconciliation loops
+                      default: 60
+                      minimum: 10
+                      maximum: 3600
+                    logLevel:
+                      type: string
+                      description: Global log level (can be overridden per tenant)
+                      default: "INFO"
+                      enum:
+                        - DEBUG
+                        - INFO
+                        - WARNING
+                        - ERROR
+                    watchNamespaces:
+                      type: string
+                      description: Comma-separated namespaces to watch (empty = all namespaces)
+                      default: ""
+                priorityClassName:
+                  type: string
+                  description: Priority class name for pod scheduling priority
+                podAnnotations:
+                  type: object
+                  description: Additional annotations for operator pod
+                  additionalProperties:
+                    type: string
+                podLabels:
+                  type: object
+                  description: Additional labels for operator pod
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  description: Last observed generation of the spec
+                lastAppliedTime:
+                  type: string
+                  format: date-time
+                  description: Last time configuration was applied to deployment
+                deploymentReady:
+                  type: boolean
+                  description: Whether the deployment is ready with new config
+                conditions:
+                  type: array
+                  description: Current conditions
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                        description: Condition type (Applied, Ready, Error, etc.)
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                        description: Condition status
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: Last time the condition transitioned
+                      reason:
+                        type: string
+                        description: Machine-readable reason for the condition
+                      message:
+                        type: string
+                        description: Human-readable message
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+        - name: CPU Request
+          type: string
+          jsonPath: .spec.resources.requests.cpu
+        - name: Memory Request
+          type: string
+          jsonPath: .spec.resources.requests.memory
+        - name: Ready
+          type: boolean
+          jsonPath: .status.deploymentReady
+        - name: Last Applied
+          type: date
+          jsonPath: .status.lastAppliedTime
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

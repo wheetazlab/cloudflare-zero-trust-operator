@@ -232,7 +232,25 @@ spec:
     shortNames: [cfzt, cfzttenant]
 ```
 
-**Purpose**: Defines the schema for tenant configuration resources
+**Purpose**: Defines the schema for tenant configuration resources (one per Cloudflare account)
+
+**Second CRD**:
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudflarezerotrustoperatorconfigs.cfzt.cloudflare.com
+spec:
+  group: cfzt.cloudflare.com
+  scope: Namespaced
+  names:
+    kind: CloudflareZeroTrustOperatorConfig
+    plural: cloudflarezerotrustoperatorconfigs
+    shortNames: [cfztconfig, operatorconfig]
+```
+
+**Purpose**: Configures operator pod scheduling, resources, and behavior (singleton per cluster)
 
 #### 2. RBAC Configuration
 
@@ -243,17 +261,22 @@ graph LR
     
     subgraph "Permissions"
         CR --> P1[Read/Write: CloudflareZeroTrustTenant]
+        CR --> P1B[Read/Write: OperatorConfig]
         CR --> P2[Read/Write/Patch: IngressRoute]
         CR --> P3[Read: Secrets]
         CR --> P4[Create/Update: Secrets]
         CR --> P5[Create: Events]
+        CR --> P6[Update: Own Deployment]
     end
 ```
 
 **ClusterRole Permissions**:
 - CloudflareZeroTrustTenant: get, list, watch, update status
+- CloudflareZeroTrustOperatorConfig: get, list, watch, update status (for self-configuration)
 - IngressRoute: get, list, watch, patch, update
 - Secrets: get, list, watch, create, update, delete
+- ConfigMaps: get, list, watch, create, update, patch, delete (for state tracking)
+- Deployments: get, list, patch, update (restricted to operator's own deployment)
 - Events: create, patch
 
 #### 3. Operator Deployment
@@ -287,8 +310,62 @@ spec:
 **Configuration Options**:
 - `WATCH_NAMESPACES`: Comma-separated list or empty for all
 - `POLL_INTERVAL_SECONDS`: How often to reconcile (default: 60)
-- `LOG_LEVEL`: DEBUG, INFO, WARNING, ERROR
+- `LOG_LEVEL`: Global log level - DEBUG, INFO, WARNING, ERROR (can be overridden per-tenant in CR)
 - `CLOUDFLARE_API_BASE`: API endpoint (default: https://api.cloudflare.com/client/v4)
+- `OPERATOR_NAMESPACE`: Namespace where operator runs and stores state ConfigMaps (default: cloudflare-zero-trust)
+
+**Per-Tenant Configuration** (in CloudflareZeroTrustTenant CR):
+- `spec.logLevel`: Override global log level for this tenant's reconciliation
+- `spec.defaults.sessionDuration`: Default Access Application session duration
+- `spec.defaults.originService`: Default origin service URL
+
+**Operator Pod Configuration** (via CloudflareZeroTrustOperatorConfig CR):
+- Dynamically controls operator pod scheduling and resources without redeployment
+- **Singleton**: Only one OperatorConfig should exist in the operator namespace
+- Applied during each reconciliation loop
+
+Available configuration:
+- `spec.replicas`: Number of operator replicas (default: 1, recommended to keep at 1)
+- `spec.resources.requests/limits`: CPU and memory resources
+- `spec.affinity`: Pod affinity and anti-affinity rules for node placement
+- `spec.nodeSelector`: Node selector labels for pod placement
+- `spec.tolerations`: Tolerations for node taints
+- `spec.priorityClassName`: Priority class for pod scheduling
+- `spec.imagePullPolicy`: Image pull policy (Always, IfNotPresent, Never)
+- `spec.environmentVariables`: Override poll interval, log level, watch namespaces
+- `spec.podLabels`: Additional labels for operator pod
+- `spec.podAnnotations`: Additional annotations for operator pod
+
+**How it works**:
+1. Operator watches its own OperatorConfig CR during reconciliation
+2. If OperatorConfig changes (generation increments), operator updates its own Deployment
+3. Kubernetes rolls out the updated Deployment
+4. Operator updates OperatorConfig status with applied generation and readiness
+
+Example usage:
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustOperatorConfig
+metadata:
+  name: operator-config
+  namespace: cloudflare-zero-trust
+spec:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "infrastructure"
+      effect: "NoSchedule"
+```
 
 ## Runtime Architecture
 
@@ -334,15 +411,22 @@ echo "Cloudflare Zero Trust Operator"
 export POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-60}"
 export WATCH_NAMESPACES="${WATCH_NAMESPACES:-}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
+export OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-cloudflare-zero-trust}"
 
-# 3. Configure Ansible environment
+# 3. Configure Ansible environment with colored output
 export ANSIBLE_CONFIG="/ansible/ansible.cfg"
 export ANSIBLE_FORCE_COLOR="true"
-export ANSIBLE_STDOUT_CALLBACK="yaml"
+export ANSIBLE_NOCOLOR="false"
+export ANSIBLE_STDOUT_CALLBACK="default"
+export ANSIBLE_STDOUT_CALLBACK_COLORS="bright"
+export ANSIBLE_DIFF_ALWAYS="True"
 
 # 4. Set Ansible verbosity based on LOG_LEVEL
 case "${LOG_LEVEL}" in
-    DEBUG) export ANSIBLE_VERBOSITY=2 ;;
+    DEBUG)
+        export ANSIBLE_VERBOSITY=2
+        export ANSIBLE_DEBUG="True"
+        ;;
     INFO) export ANSIBLE_VERBOSITY=1 ;;
     *) export ANSIBLE_VERBOSITY=0 ;;
 esac
@@ -353,6 +437,12 @@ while true; do
     sleep "${POLL_INTERVAL_SECONDS}"
 done
 ```
+
+**Log Output Features**:
+- **Colored output**: ANSI color codes enabled for better readability in container logs
+- **Callback plugin**: Uses "default" callback with bright colors for task status
+- **Per-tenant verbosity**: Can override global LOG_LEVEL in CloudflareZeroTrustTenant CR
+- **Diff output**: Shows changes when updating resources
 
 ### Pod Resource Usage
 
@@ -634,13 +724,13 @@ graph TB
         W2[IngressRoute annotations]
         W3[Service Token Secrets]
         W4[Events]
+        W5[ConfigMaps - State Tracking]
     end
     
     subgraph "Cannot Access"
-        X1[Other Secrets]
-        X2[ConfigMaps]
-        X3[Deployments]
-        X4[Other Resources]
+        X1[Other Secrets - not referenced by tenant]
+        X2[Deployments]
+        X3[Other Resources]
     end
     
     SA --> R1
@@ -648,6 +738,9 @@ graph TB
     SA --> R3
     SA --> W1
     SA --> W2
+    SA --> W3
+    SA --> W4
+    SA --> W5
     SA --> W3
     SA --> W4
     

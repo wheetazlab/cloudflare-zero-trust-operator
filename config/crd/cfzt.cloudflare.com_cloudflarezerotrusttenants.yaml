@@ -75,6 +75,15 @@ spec:
                       type: string
                       description: Default origin service URL
                       default: "http://traefik.traefik.svc:80"
+                logLevel:
+                  type: string
+                  description: Log level for reconciliation of this tenant (DEBUG, INFO, WARNING, ERROR)
+                  default: "INFO"
+                  enum:
+                    - DEBUG
+                    - INFO
+                    - WARNING
+                    - ERROR
             status:
               type: object
               properties:

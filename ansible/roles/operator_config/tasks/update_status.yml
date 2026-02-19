@@ -1,0 +1,52 @@
+---
+# ansible/roles/operator_config/tasks/update_status.yml
+# Update OperatorConfig CRD status after applying configuration
+
+- name: "Operator Config Status | Get deployment ready status"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: cloudflare-zero-trust-operator
+    namespace: "{{ operator_namespace }}"
+  register: deployment_status_check
+
+- name: "Operator Config Status | Set deployment ready fact"
+  set_fact:
+    deployment_ready: >-
+      {{
+        (deployment_status_check.resources | length > 0) and
+        (deployment_status_check.resources[0].status.readyReplicas | default(0) >= deployment_status_check.resources[0].spec.replicas | default(1))
+      }}
+
+- name: "Operator Config Status | Build status conditions"
+  set_fact:
+    status_conditions:
+      - type: "Applied"
+        status: "{{ deployment_update_result.changed | default(false) | ternary('True', operator_config.status.conditions | selectattr('type', 'equalto', 'Applied') | map(attribute='status') | first | default('Unknown')) }}"
+        lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
+        reason: "{{ deployment_update_result.changed | default(false) | ternary('ConfigurationApplied', 'NoChangesNeeded') }}"
+        message: "{{ deployment_update_result.changed | default(false) | ternary('OperatorConfig successfully applied to deployment', 'Deployment already matches configuration') }}"
+      - type: "Ready"
+        status: "{{ deployment_ready | ternary('True', 'False') }}"
+        lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
+        reason: "{{ deployment_ready | ternary('DeploymentReady', 'DeploymentNotReady') }}"
+        message: "{{ deployment_ready | ternary('Operator deployment is ready', 'Waiting for deployment to become ready') }}"
+
+- name: "Operator Config Status | Update CloudflareZeroTrustOperatorConfig status"
+  kubernetes.core.k8s_status:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareZeroTrustOperatorConfig
+    name: "{{ operator_config.metadata.name }}"
+    namespace: "{{ operator_namespace }}"
+    status:
+      observedGeneration: "{{ operator_config.metadata.generation }}"
+      lastAppliedTime: "{{ ansible_date_time.iso8601 }}"
+      deploymentReady: "{{ deployment_ready }}"
+      conditions: "{{ status_conditions }}"
+  register: status_update_result
+  failed_when: false
+
+- name: "Operator Config Status | Status updated"
+  debug:
+    msg: "OperatorConfig status updated: Ready={{ deployment_ready }}, ObservedGeneration={{ operator_config.metadata.generation }}"
+    verbosity: 1

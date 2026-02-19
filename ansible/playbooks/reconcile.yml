@@ -34,6 +34,12 @@
     operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
     
   tasks:
+    - name: Check and apply operator configuration
+      include_role:
+        name: operator_config
+      vars:
+        operator_namespace: "{{ operator_namespace }}"
+
     - name: Get all CloudflareZeroTrustTenant resources
       include_role:
         name: k8s_watch

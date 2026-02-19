@@ -41,6 +41,37 @@ rules:
       - patch
       - update
   
+  # CloudflareZeroTrustOperatorConfig CRD permissions (for self-configuration)
+  - apiGroups:
+      - cfzt.cloudflare.com
+    resources:
+      - cloudflarezerotrustoperatorconfigs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - cfzt.cloudflare.com
+    resources:
+      - cloudflarezerotrustoperatorconfigs/status
+    verbs:
+      - get
+      - patch
+      - update
+  
+  # Deployment permissions (for self-updating based on OperatorConfig)
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+    resourceNames:
+      - cloudflare-zero-trust-operator
+  
   # Traefik IngressRoute permissions
   - apiGroups:
       - traefik.io
@@ -65,6 +96,20 @@ rules:
       - watch
       - create
       - update
+      - delete
+  
+  # ConfigMap permissions (for state tracking)
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
       - delete
   
   # Events for logging

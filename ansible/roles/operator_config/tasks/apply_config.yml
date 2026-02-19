@@ -1,0 +1,91 @@
+---
+# ansible/roles/operator_config/tasks/apply_config.yml
+# Apply OperatorConfig to the operator Deployment
+
+- name: "Operator Config | Get current Deployment"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: cloudflare-zero-trust-operator
+    namespace: "{{ operator_namespace }}"
+  register: current_deployment
+
+- name: "Operator Config | Set current deployment fact"
+  set_fact:
+    deployment: "{{ current_deployment.resources | first }}"
+  when: current_deployment.resources | length > 0
+
+- name: "Operator Config | Build updated deployment spec"
+  set_fact:
+    updated_deployment_spec:
+      replicas: "{{ operator_config.spec.replicas | default(deployment.spec.replicas) }}"
+      template:
+        metadata:
+          labels: "{{ deployment.spec.template.metadata.labels | combine(operator_config.spec.podLabels | default({})) }}"
+          annotations: "{{ deployment.spec.template.metadata.annotations | default({}) | combine(operator_config.spec.podAnnotations | default({})) }}"
+        spec:
+          serviceAccountName: "{{ deployment.spec.template.spec.serviceAccountName }}"
+          containers:
+            - name: operator
+              image: "{{ deployment.spec.template.spec.containers[0].image }}"
+              imagePullPolicy: "{{ operator_config.spec.imagePullPolicy | default(deployment.spec.template.spec.containers[0].imagePullPolicy) }}"
+              env: "{{ deployment.spec.template.spec.containers[0].env | union(build_env_vars) }}"
+              resources: "{{ operator_config.spec.resources | default(deployment.spec.template.spec.containers[0].resources) }}"
+              securityContext: "{{ deployment.spec.template.spec.containers[0].securityContext }}"
+              volumeMounts: "{{ deployment.spec.template.spec.containers[0].volumeMounts }}"
+          volumes: "{{ deployment.spec.template.spec.volumes }}"
+          restartPolicy: "{{ deployment.spec.template.spec.restartPolicy }}"
+          securityContext: "{{ deployment.spec.template.spec.securityContext }}"
+          affinity: "{{ operator_config.spec.affinity | default(deployment.spec.template.spec.affinity | default({})) }}"
+          nodeSelector: "{{ operator_config.spec.nodeSelector | default(deployment.spec.template.spec.nodeSelector | default({})) }}"
+          tolerations: "{{ operator_config.spec.tolerations | default(deployment.spec.template.spec.tolerations | default([])) }}"
+          priorityClassName: "{{ operator_config.spec.priorityClassName | default(deployment.spec.template.spec.priorityClassName | default(omit)) }}"
+  vars:
+    build_env_vars: >-
+      {{
+        (operator_config.spec.environmentVariables.pollIntervalSeconds is defined) | ternary(
+          [{'name': 'POLL_INTERVAL_SECONDS', 'value': operator_config.spec.environmentVariables.pollIntervalSeconds | string}],
+          []
+        ) +
+        (operator_config.spec.environmentVariables.logLevel is defined) | ternary(
+          [{'name': 'LOG_LEVEL', 'value': operator_config.spec.environmentVariables.logLevel}],
+          []
+        ) +
+        (operator_config.spec.environmentVariables.watchNamespaces is defined) | ternary(
+          [{'name': 'WATCH_NAMESPACES', 'value': operator_config.spec.environmentVariables.watchNamespaces}],
+          []
+        )
+      }}
+
+- name: "Operator Config | Check if deployment update needed"
+  set_fact:
+    deployment_needs_update: true
+  when: 
+    - operator_config.metadata.generation is defined
+    - operator_config.status.observedGeneration is defined
+    - operator_config.metadata.generation != operator_config.status.observedGeneration
+
+- name: "Operator Config | Apply updated deployment"
+  kubernetes.core.k8s:
+    api_version: apps/v1
+    kind: Deployment
+    name: cloudflare-zero-trust-operator
+    namespace: "{{ operator_namespace }}"
+    state: present
+    definition:
+      spec: "{{ updated_deployment_spec }}"
+  when: deployment_needs_update | default(false)
+  register: deployment_update_result
+
+- name: "Operator Config | Deployment updated"
+  debug:
+    msg: "Operator deployment updated with new configuration from {{ operator_config.metadata.name }}"
+  when: 
+    - deployment_update_result is defined
+    - deployment_update_result.changed
+
+- name: "Operator Config | No deployment update needed"
+  debug:
+    msg: "Deployment already matches OperatorConfig (observedGeneration={{ operator_config.status.observedGeneration | default('N/A') }})"
+    verbosity: 1
+  when: not (deployment_needs_update | default(false))

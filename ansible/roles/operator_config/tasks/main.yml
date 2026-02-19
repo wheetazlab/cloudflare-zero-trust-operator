@@ -1,0 +1,40 @@
+---
+# ansible/roles/operator_config/tasks/main.yml
+# Role: operator_config
+# Purpose: Watch OperatorConfig CRD and update operator Deployment accordingly
+
+- name: "Operator Config | Get CloudflareZeroTrustOperatorConfig in operator namespace"
+  kubernetes.core.k8s_info:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareZeroTrustOperatorConfig
+    namespace: "{{ operator_namespace }}"
+  register: operator_configs
+  failed_when: false
+
+- name: "Operator Config | Set operator_config fact"
+  set_fact:
+    operator_config: "{{ operator_configs.resources | first | default({}) }}"
+  when: operator_configs.resources | length > 0
+
+- name: "Operator Config | No OperatorConfig found - using deployment defaults"
+  debug:
+    msg: "No CloudflareZeroTrustOperatorConfig found in {{ operator_namespace }}. Using existing deployment configuration."
+  when: operator_configs.resources | length == 0
+
+- name: "Operator Config | Display current configuration"
+  debug:
+    msg: "OperatorConfig: {{ operator_config.metadata.name }} (generation: {{ operator_config.metadata.generation | default('N/A') }})"
+    verbosity: 1
+  when: operator_configs.resources | length > 0
+
+- name: "Operator Config | Apply configuration to deployment"
+  include_tasks: apply_config.yml
+  when: 
+    - operator_configs.resources | length > 0
+    - operator_config.spec is defined
+
+- name: "Operator Config | Update status"
+  include_tasks: update_status.yml
+  when: 
+    - operator_configs.resources | length > 0
+    - operator_config.metadata is defined

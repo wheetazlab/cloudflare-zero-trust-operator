@@ -12,10 +12,11 @@
     tenant_zone_id: "{{ tenant.spec.zoneId | default('') }}"
     tenant_credential_ref: "{{ tenant.spec.credentialRef }}"
     tenant_defaults: "{{ tenant.spec.defaults | default({}) }}"
+    tenant_log_level: "{{ tenant.spec.logLevel | default(log_level | default('INFO')) }}"
 
 - name: Display reconciliation start
   ansible.builtin.debug:
-    msg: "Reconciling tenant: {{ tenant_namespace }}/{{ tenant_name }}"
+    msg: "Reconciling tenant: {{ tenant_namespace }}/{{ tenant_name }} (logLevel: {{ tenant_log_level }})"
 
 - name: Get Cloudflare API token from Secret
   kubernetes.core.k8s_info:

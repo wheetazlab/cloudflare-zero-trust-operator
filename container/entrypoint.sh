@@ -20,9 +20,13 @@ export OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-cloudflare-zero-trust}"
 # Set Ansible environment
 export ANSIBLE_CONFIG="/ansible/ansible.cfg"
 export ANSIBLE_FORCE_COLOR="true"
+export ANSIBLE_NOCOLOR="false"
 export ANSIBLE_HOST_KEY_CHECKING="False"
 export ANSIBLE_RETRY_FILES_ENABLED="False"
-export ANSIBLE_STDOUT_CALLBACK="yaml"
+export ANSIBLE_STDOUT_CALLBACK="default"
+export ANSIBLE_STDOUT_CALLBACK_COLORS="bright"
+export ANSIBLE_DIFF_ALWAYS="True"
+export ANSIBLE_DIFF_CONTEXT="3"
 
 # Set log level for Ansible
 case "${LOG_LEVEL}" in

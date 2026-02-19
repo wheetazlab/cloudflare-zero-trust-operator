@@ -1,0 +1,99 @@
+---
+# Advanced CloudflareZeroTrustOperatorConfig Example
+# This example shows operator configured for dedicated infrastructure nodes
+
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustOperatorConfig
+metadata:
+  name: operator-config
+  namespace: cloudflare-zero-trust
+  labels:
+    app: cloudflare-zero-trust-operator
+spec:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  environmentVariables:
+    pollIntervalSeconds: 30  # More frequent reconciliation
+    logLevel: "DEBUG"        # Verbose logging
+    watchNamespaces: "production,staging"  # Only watch specific namespaces
+
+  imagePullPolicy: "IfNotPresent"
+
+  # Schedule on dedicated infrastructure nodes
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+    kubernetes.io/arch: "amd64"
+
+  # Prefer nodes in specific zones, avoid nodes with recent issues
+  affinity:
+    nodeAffinity:
+      # MUST be on infra nodes
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/infra
+                operator: Exists
+      # PREFER specific zones
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: topology.kubernetes.io/zone
+                operator: In
+                values:
+                  - us-west-2a
+                  - us-west-2b
+        - weight: 50
+          preference:
+            matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values:
+                  - t3.medium
+                  - t3.large
+    
+    # Anti-affinity: Don't schedule multiple replicas on same node (if replicas > 1)
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app: cloudflare-zero-trust-operator
+            topologyKey: kubernetes.io/hostname
+
+  # Tolerate taints on infrastructure nodes
+  tolerations:
+    - key: "node-role.kubernetes.io/infra"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "dedicated"
+      operator: "Equal"
+      value: "infrastructure"
+      effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+      effect: "NoExecute"
+
+  # High priority scheduling
+  priorityClassName: "system-cluster-critical"
+
+  # Additional metadata
+  podLabels:
+    team: "platform-engineering"
+    environment: "production"
+    cost-center: "infrastructure"
+
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"

@@ -7,6 +7,8 @@ Detailed flow documentation showing how the operator reconciles resources once i
 
 - [Overview](#overview)
 - [State Management](#state-management)
+- [Logging Configuration](#logging-configuration)
+- [Operator Configuration (Self-Reconciliation)](#operator-configuration-self-reconciliation)
 - [Main Reconciliation Loop](#main-reconciliation-loop)
 - [Playbook Execution](#playbook-execution)
 - [Role Details](#role-details)
@@ -58,6 +60,243 @@ data:
 - After each reconciliation cycle, cleanup orphaned ConfigMaps
 - Orphaned = ConfigMap exists but IngressRoute no longer exists
 - Prevents ConfigMap accumulation over time
+
+## Logging Configuration
+
+The operator provides flexible logging configuration with both **global** and **per-tenant** verbosity control, plus **colored terminal output** for better readability.
+
+### Global Log Level
+
+Configured via environment variable in operator deployment:
+
+```yaml
+env:
+  - name: LOG_LEVEL
+    value: "INFO"  # DEBUG, INFO, WARNING, ERROR
+```
+
+**Log Levels**:
+- `DEBUG`: Maximum verbosity (ANSIBLE_VERBOSITY=2) - shows all task details, variables, API calls
+- `INFO`: Standard verbosity (ANSIBLE_VERBOSITY=1) - shows high-level reconciliation events
+- `WARNING`: Minimal verbosity (ANSIBLE_VERBOSITY=0) - shows only warnings and errors
+- `ERROR`: Minimal verbosity (ANSIBLE_VERBOSITY=0) - shows only errors
+
+### Per-Tenant Log Level
+
+Individual tenants can override the global log level in their Custom Resource:
+
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTenant
+metadata:
+  name: staging
+  namespace: default
+spec:
+  logLevel: DEBUG  # Optional: Override global LOG_LEVEL for this tenant
+  accountId: "..."
+  # ... other spec fields
+```
+
+**Override Behavior**:
+- If `spec.logLevel` is set, it takes precedence for that tenant's reconciliation
+- If not set, uses global `LOG_LEVEL` environment variable
+- Allows debugging specific tenants without enabling verbose logs globally
+
+### Colored Output
+
+Ansible output includes ANSI color codes for better terminal readability:
+
+**Environment Configuration** (applied in `entrypoint.sh`):
+```bash
+export ANSIBLE_FORCE_COLOR="true"
+export ANSIBLE_NOCOLOR="false"
+export ANSIBLE_STDOUT_CALLBACK="default"
+export ANSIBLE_STDOUT_CALLBACK_COLORS="bright"
+export ANSIBLE_DIFF_ALWAYS="True"
+```
+
+**Color Scheme**:
+- ✅ **Green**: Successful tasks (ok, skipped)
+- 🔶 **Yellow**: Changed tasks (updated resources)
+- 🔴 **Red**: Failed tasks (errors)
+- 🔵 **Cyan**: Task names and headers
+- **Diffs**: Shows before/after changes when resources are updated
+
+**Viewing Logs**:
+```bash
+# Stream colored logs from operator pod
+kubectl logs -n cloudflare-zero-trust deployment/cfzt-operator -f
+
+# Watch specific tenant reconciliation
+kubectl logs -n cloudflare-zero-trust deployment/cfzt-operator -f | grep "staging"
+```
+
+### Debug Mode
+
+When LOG_LEVEL=DEBUG or spec.logLevel=DEBUG, enables additional debugging:
+
+```bash
+export ANSIBLE_DEBUG="True"  # Show internal Ansible debugging
+export ANSIBLE_VERBOSITY=2   # Maximum task verbosity
+```
+
+**Debug Output Includes**:
+- Full task parameters and variables
+- API request/response details
+- Template rendering output
+- Task timing information
+- Module argument specifications
+
+## Operator Configuration (Self-Reconciliation)
+
+The operator can **dynamically reconfigure itself** by watching a `CloudflareZeroTrustOperatorConfig` Custom Resource. This allows changing pod scheduling, resources, and behavior without manual redeployment.
+
+### OperatorConfig CRD
+
+**Purpose**: Configure operator pod placement, resources, and runtime behavior
+
+**Location**: Should exist in operator namespace (e.g., `cloudflare-zero-trust`)
+
+**Singleton**: Only one OperatorConfig per operator deployment
+
+**Example**:
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustOperatorConfig
+metadata:
+  name: operator-config
+  namespace: cloudflare-zero-trust
+spec:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "infrastructure"
+      effect: "NoSchedule"
+  environmentVariables:
+    pollIntervalSeconds: 30
+    logLevel: "INFO"
+```
+
+### Self-Configuration Flow
+
+```mermaid
+flowchart TD
+    START([Reconciliation Loop Starts]) --> GET_CONFIG[Get OperatorConfig CR]
+    
+    GET_CONFIG --> CONFIG_EXISTS{OperatorConfig<br/>Exists?}
+    
+    CONFIG_EXISTS -->|No| SKIP[Skip self-config<br/>Use current deployment]
+    CONFIG_EXISTS -->|Yes| CHECK_GEN{Generation<br/>Changed?}
+    
+    CHECK_GEN -->|No| SKIP_UPDATE[No update needed<br/>ObservedGeneration matches]
+    CHECK_GEN -->|Yes| GET_DEPLOY[Get Current Deployment]
+    
+    GET_DEPLOY --> BUILD_SPEC[Build Updated Deployment Spec]
+    
+    BUILD_SPEC --> MERGE[Merge OperatorConfig into Spec]
+    MERGE --> APPLY[Apply Updated Deployment]
+    
+    APPLY --> UPDATE_STATUS[Update OperatorConfig Status]
+    UPDATE_STATUS --> WAIT[Wait for Deployment Rollout]
+    
+    WAIT --> CONTINUE[Continue with Tenant Reconciliation]
+    SKIP --> CONTINUE
+    SKIP_UPDATE --> CONTINUE
+    
+    style START fill:#90EE90
+    style APPLY fill:#FFD700
+    style UPDATE_STATUS fill:#87CEEB
+    style CONTINUE fill:#90EE90
+```
+
+**Self-Configuration Steps**:
+
+1. **Check for OperatorConfig**: Query for `CloudflareZeroTrustOperatorConfig` in operator namespace
+2. **Compare generations**: Compare `metadata.generation` vs `status.observedGeneration`
+3. **Build updated spec**: Merge OperatorConfig settings into current Deployment spec
+4. **Apply deployment**: Patch operator's own Deployment with new configuration
+5. **Update status**: Set `status.observedGeneration`, `status.deploymentReady`, conditions
+
+**Configurable Fields**:
+- `replicas`: Number of operator pods
+- `resources`: CPU/memory requests and limits
+- `affinity`: Node affinity and pod anti-affinity rules
+- `nodeSelector`: Node labels for pod placement
+- `tolerations`: Tolerate specific node taints
+- `priorityClassName`: Pod priority for scheduling
+- `imagePullPolicy`: Container image pull policy
+- `environmentVariables`: Override POLL_INTERVAL, LOG_LEVEL, WATCH_NAMESPACES
+- `podLabels`: Additional pod labels
+- `podAnnotations`: Additional pod annotations (e.g., Prometheus scrape config)
+
+**Status Updates**:
+```yaml
+status:
+  observedGeneration: 5
+  lastAppliedTime: "2026-02-18T10:00:00Z"
+  deploymentReady: true
+  conditions:
+    - type: Applied
+      status: "True"
+      reason: ConfigurationApplied
+      message: OperatorConfig successfully applied to deployment
+    - type: Ready
+      status: "True"
+      reason: DeploymentReady
+      message: Operator deployment is ready
+```
+
+### Usage Examples
+
+**Basic resource adjustment**:
+```bash
+# Update operator resources
+kubectl patch cfztconfig operator-config -n cloudflare-zero-trust --type=merge -p '
+spec:
+  resources:
+    requests:
+      memory: "1Gi"
+    limits:
+      memory: "2Gi"
+'
+
+# Operator will detect change and update itself within 60 seconds (or current poll interval)
+```
+
+**Schedule on dedicated nodes**:
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustOperatorConfig
+metadata:
+  name: operator-config
+  namespace: cloudflare-zero-trust
+spec:
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: node-role.kubernetes.io/infra
+      operator: Exists
+      effect: NoSchedule
+```
+
+**Check configuration status**:
+```bash
+# View current OperatorConfig status
+kubectl get cfztconfig -n cloudflare-zero-trust
+
+# Detailed status
+kubectl describe cfztconfig operator-config -n cloudflare-zero-trust
+```
 
 ## Main Reconciliation Loop
 
@@ -140,7 +379,10 @@ flowchart TD
     
     TRIGGER --> PLAY2[Play 2: Reconcile Resources]
     
-    PLAY2 --> K8S_TENANTS[Task: Get CloudflareZeroTrustTenant CRs]
+    PLAY2 --> OP_CONFIG[Task: Check operator configuration]
+    OP_CONFIG --> ROLE_OP_CONFIG[Role: operator_config]
+    ROLE_OP_CONFIG --> K8S_TENANTS[Task: Get CloudflareZeroTrustTenant CRs]
+    
     K8S_TENANTS --> ROLE_K8S_T[Role: k8s_watch/list_tenants.yml]
     ROLE_K8S_T --> SET_TENANTS[Set Fact: cfzt_tenants]
     
@@ -164,6 +406,7 @@ flowchart TD
     style START fill:#90EE90
     style PLAY1 fill:#87CEEB
     style PLAY2 fill:#87CEEB
+    style OP_CONFIG fill:#DDA0DD
     style TENANT_LOOP fill:#FFD700
     style CLEANUP fill:#FFA07A
     style SLEEP fill:#FFB6C1

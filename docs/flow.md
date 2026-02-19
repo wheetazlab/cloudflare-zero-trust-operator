@@ -559,22 +559,22 @@ The state_manager role has three task files:
 ```mermaid
 flowchart TD
     START([check_state.yml]) --> EXTRACT[Extract IngressRoute metadata]
-    EXTRACT --> GEN_NAME[Generate ConfigMap name:<br/>cfzt-{namespace}-{name}]
+    EXTRACT --> GEN_NAME["Generate ConfigMap name:<br/>cfzt-namespace-name"]
     
-    GEN_NAME --> PARSE_ANNO[Extract cfzt.cloudflare.com/* annotations]
+    GEN_NAME --> PARSE_ANNO["Extract cfzt.cloudflare.com/* annotations"]
     
     PARSE_ANNO --> HASH[Calculate SHA256 hash of annotations]
     
-    HASH --> CHECK_CM[kubernetes.core.k8s_info<br/>Query ConfigMap]
+    HASH --> CHECK_CM["kubernetes.core.k8s_info<br/>Query ConfigMap"]
     
     CHECK_CM --> EXISTS{ConfigMap exists?}
     
-    EXISTS -->|No| NEED[Set: needs_reconciliation = true]
+    EXISTS -->|No| NEED["Set: needs_reconciliation = true"]
     EXISTS -->|Yes| GET_HASH[Get stored annotation_hash]
     
     GET_HASH --> COMPARE{Hashes match?}
     COMPARE -->|No| NEED
-    COMPARE -->|Yes| SKIP[Set: needs_reconciliation = false]
+    COMPARE -->|Yes| SKIP["Set: needs_reconciliation = false"]
     
     NEED --> END([Done])
     SKIP --> END
@@ -598,11 +598,11 @@ flowchart TD
 flowchart TD
     START([update_state.yml]) --> TIMESTAMP[Get current timestamp]
     
-    TIMESTAMP --> BUILD[Build ConfigMap definition:<br/>- annotation_hash<br/>- cloudflare_ids (JSON)<br/>- last_sync_time<br/>- ingressroute_namespace<br/>- ingressroute_name]
+    TIMESTAMP --> BUILD["Build ConfigMap definition<br/>with annotation_hash, cloudflare_ids,<br/>last_sync_time, and IngressRoute metadata"]
     
-    BUILD --> CREATE[kubernetes.core.k8s<br/>Create or update ConfigMap]
+    BUILD --> CREATE["kubernetes.core.k8s<br/>Create or update ConfigMap"]
     
-    CREATE --> LABELS[Labels:<br/>- app.kubernetes.io/name<br/>- cfzt.cloudflare.com/ingressroute-*]
+    CREATE --> LABELS["Apply labels for tracking<br/>and ownership"]
     
     LABELS --> END([Done])
     

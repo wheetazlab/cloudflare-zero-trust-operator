@@ -1,0 +1,96 @@
+---
+# Delete Cloudflare resources
+# Variables required:
+#   - cf_api_token: Cloudflare API token
+#   - cf_account_id: Cloudflare account ID
+#   - cf_api_base: Cloudflare API base URL
+#   - delete_app_id: (optional) Access Application ID to delete
+#   - delete_policy_ids: (optional) List of Access Policy IDs to delete
+#   - delete_token_id: (optional) Service Token ID to delete
+#   - delete_tunnel_id: (optional) Tunnel ID to remove hostname from
+#   - delete_hostname: (optional) Hostname to remove from tunnel
+
+- name: Delete Access Policies
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ delete_app_id }}/policies/{{ item }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200, 204, 404]
+  register: delete_policy_response
+  retries: 3
+  delay: 5
+  until: delete_policy_response.status in [200, 204, 404]
+  loop: "{{ delete_policy_ids | default([]) }}"
+  when: delete_app_id is defined and delete_policy_ids is defined and delete_policy_ids | length > 0
+
+- name: Delete Access Application
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ delete_app_id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200, 204, 404]
+  register: delete_app_response
+  retries: 3
+  delay: 5
+  until: delete_app_response.status in [200, 204, 404]
+  when: delete_app_id is defined and delete_app_id != ""
+
+- name: Delete Service Token
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/service_tokens/{{ delete_token_id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200, 204, 404]
+  register: delete_token_response
+  retries: 3
+  delay: 5
+  until: delete_token_response.status in [200, 204, 404]
+  when: delete_token_id is defined and delete_token_id != ""
+
+- name: Remove hostname from tunnel configuration
+  block:
+    - name: Get current tunnel configuration
+      ansible.builtin.uri:
+        url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ delete_tunnel_id }}/configurations"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cf_api_token }}"
+          Content-Type: "application/json"
+        status_code: [200, 404]
+        return_content: true
+      register: tunnel_config_response
+
+    - name: Remove hostname from ingress rules
+      ansible.builtin.set_fact:
+        updated_ingress: "{{ tunnel_config_response.json.result.config.ingress | rejectattr('hostname', 'equalto', delete_hostname) | list }}"
+      when: tunnel_config_response.status == 200
+
+    - name: Update tunnel configuration
+      ansible.builtin.uri:
+        url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ delete_tunnel_id }}/configurations"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ cf_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          config:
+            ingress: "{{ updated_ingress }}"
+        status_code: [200, 201]
+      register: update_tunnel_response
+      when: tunnel_config_response.status == 200
+  when: delete_tunnel_id is defined and delete_hostname is defined
+
+- name: Set deletion result
+  ansible.builtin.set_fact:
+    deletion_result:
+      success: true
+      deleted_app: "{{ delete_app_id | default('none') }}"
+      deleted_token: "{{ delete_token_id | default('none') }}"
+      deleted_hostname: "{{ delete_hostname | default('none') }}"

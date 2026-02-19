@@ -1,0 +1,101 @@
+---
+# Manage Cloudflare Access Policy
+# Variables required:
+#   - cf_api_token: Cloudflare API token
+#   - cf_account_id: Cloudflare account ID
+#   - cf_app_id: Access Application ID
+#   - cf_policy_name: Policy name
+#   - cf_allow_groups: (optional) List of group names to allow
+#   - cf_allow_emails: (optional) List of emails to allow
+#   - cf_policy_id: (optional) Existing policy ID for updates
+#   - cf_api_base: Cloudflare API base URL
+
+- name: Build include rules for groups
+  ansible.builtin.set_fact:
+    group_rules: "{{ cf_allow_groups | default([]) | map('regex_replace', '^(.*)$', '{\"group\": {\"id\": \"\\1\"}}') | list }}"
+  when: cf_allow_groups is defined and cf_allow_groups | length > 0
+
+- name: Build include rules for emails
+  ansible.builtin.set_fact:
+    email_rules: []
+  when: cf_allow_emails is defined and cf_allow_emails | length > 0
+
+- name: Add email rules
+  ansible.builtin.set_fact:
+    email_rules: "{{ email_rules | default([]) + [{'email': {'email': item}}] }}"
+  loop: "{{ cf_allow_emails | default([]) }}"
+  when: cf_allow_emails is defined and cf_allow_emails | length > 0
+
+- name: Combine include rules
+  ansible.builtin.set_fact:
+    include_rules: "{{ (group_rules | default([]) | map('from_json') | list) + (email_rules | default([])) }}"
+
+- name: Set default include rules if empty
+  ansible.builtin.set_fact:
+    include_rules: [{"everyone": {}}]
+  when: include_rules | length == 0
+
+- name: Build Access Policy payload
+  ansible.builtin.set_fact:
+    access_policy_payload:
+      name: "{{ cf_policy_name }}"
+      decision: "allow"
+      include: "{{ include_rules }}"
+      precedence: 1
+
+- name: Create Access Policy
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ access_policy_payload }}"
+    status_code: [200, 201]
+    return_content: true
+  register: create_policy_response
+  retries: 3
+  delay: 5
+  until: create_policy_response.status in [200, 201]
+  when: cf_policy_id is not defined or cf_policy_id == ""
+
+- name: Update Access Policy
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}/policies/{{ cf_policy_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ access_policy_payload }}"
+    status_code: [200, 201]
+    return_content: true
+  register: update_policy_response
+  retries: 3
+  delay: 5
+  until: update_policy_response.status in [200, 201]
+  when: cf_policy_id is defined and cf_policy_id != ""
+
+- name: Set policy result (create)
+  ansible.builtin.set_fact:
+    access_policy_result:
+      success: true
+      policy_id: "{{ create_policy_response.json.result.id }}"
+      policy_name: "{{ cf_policy_name }}"
+      created: true
+  when: cf_policy_id is not defined or cf_policy_id == ""
+
+- name: Set policy result (update)
+  ansible.builtin.set_fact:
+    access_policy_result:
+      success: true
+      policy_id: "{{ cf_policy_id }}"
+      policy_name: "{{ cf_policy_name }}"
+      created: false
+  when: cf_policy_id is defined and cf_policy_id != ""
+
+- name: Display Access Policy result
+  ansible.builtin.debug:
+    msg: "Access Policy {{ 'created' if access_policy_result.created else 'updated' }}: {{ cf_policy_name }} ({{ access_policy_result.policy_id }})"
+    verbosity: 1

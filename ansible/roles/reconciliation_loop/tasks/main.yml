@@ -1,0 +1,40 @@
+---
+# Reconciliation loop - continuously run reconciliation with pause
+# Variables:
+#   - reconcile_interval: Interval between reconciliations in seconds
+
+- name: Display reconciliation loop start
+  ansible.builtin.debug:
+    msg: "Starting reconciliation loop (interval: {{ reconcile_interval }}s)"
+
+- name: Run reconciliation loop
+  block:
+    - name: Trigger reconciliation
+      ansible.builtin.command:
+        cmd: ansible-playbook /ansible/playbooks/reconcile.yml --skip-tags loop
+      register: reconcile_result
+      changed_when: false
+      failed_when: false
+
+    - name: Display reconciliation result
+      ansible.builtin.debug:
+        msg: "Reconciliation completed with return code: {{ reconcile_result.rc }}"
+        verbosity: 1
+
+    - name: Wait before next reconciliation
+      ansible.builtin.pause:
+        seconds: "{{ reconcile_interval }}"
+
+    - name: Continue loop
+      ansible.builtin.include_tasks: main.yml
+  rescue:
+    - name: Handle reconciliation error
+      ansible.builtin.debug:
+        msg: "Reconciliation error occurred, retrying in {{ reconcile_interval }}s"
+
+    - name: Wait before retry
+      ansible.builtin.pause:
+        seconds: "{{ reconcile_interval }}"
+
+    - name: Continue loop after error
+      ansible.builtin.include_tasks: main.yml

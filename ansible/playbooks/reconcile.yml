@@ -1,0 +1,55 @@
+---
+- name: Cloudflare Zero Trust Operator Reconciliation
+  hosts: localhost
+  gather_facts: false
+  vars:
+    poll_interval: "{{ lookup('env', 'POLL_INTERVAL_SECONDS') | default('60', true) | int }}"
+    watch_namespaces: "{{ lookup('env', 'WATCH_NAMESPACES') | default('', true) }}"
+    log_level: "{{ lookup('env', 'LOG_LEVEL') | default('INFO', true) }}"
+    cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
+    operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
+    
+  tasks:
+    - name: Display operator startup information
+      ansible.builtin.debug:
+        msg:
+          - "=== Cloudflare Zero Trust Operator Starting ==="
+          - "Watch Namespaces: {{ watch_namespaces if watch_namespaces else 'ALL' }}"
+          - "Poll Interval: {{ poll_interval }} seconds"
+          - "Log Level: {{ log_level }}"
+          - "Cloudflare API Base: {{ cloudflare_api_base }}"
+
+    - name: Start reconciliation loop
+      ansible.builtin.include_role:
+        name: reconciliation_loop
+      vars:
+        reconcile_interval: "{{ poll_interval }}"
+
+- name: Reconcile Cloudflare Zero Trust Resources
+  hosts: localhost
+  gather_facts: false
+  vars:
+    watch_namespaces: "{{ lookup('env', 'WATCH_NAMESPACES') | default('', true) }}"
+    cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
+    
+  tasks:
+    - name: Get all CloudflareZeroTrustTenant resources
+      include_role:
+        name: k8s_watch
+        tasks_from: list_tenants.yml
+
+    - name: Get all IngressRoute resources
+      include_role:
+        name: k8s_watch
+        tasks_from: list_ingressroutes.yml
+      vars:
+        namespaces: "{{ watch_namespaces.split(',') if watch_namespaces else [] }}"
+
+    - name: Reconcile each tenant
+      include_role:
+        name: tenant_reconcile
+      loop: "{{ cfzt_tenants | default([]) }}"
+      loop_control:
+        loop_var: tenant
+        label: "{{ tenant.metadata.namespace }}/{{ tenant.metadata.name }}"
+      when: cfzt_tenants is defined and cfzt_tenants | length > 0

@@ -1,0 +1,58 @@
+---
+# Manage Cloudflare Service Token
+# Variables required:
+#   - cf_api_token: Cloudflare API token
+#   - cf_account_id: Cloudflare account ID
+#   - cf_token_name: Service token name
+#   - cf_token_id: (optional) Existing service token ID (for reference only, can't update)
+#   - cf_api_base: Cloudflare API base URL
+
+- name: Create Service Token
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/service_tokens"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ cf_token_name }}"
+      duration: "8760h"  # 1 year
+    status_code: [200, 201]
+    return_content: true
+  register: create_token_response
+  retries: 3
+  delay: 5
+  until: create_token_response.status in [200, 201]
+  when: cf_token_id is not defined or cf_token_id == ""
+
+- name: Set service token result (create)
+  ansible.builtin.set_fact:
+    service_token_result:
+      success: true
+      token_id: "{{ create_token_response.json.result.id }}"
+      token_name: "{{ cf_token_name }}"
+      client_id: "{{ create_token_response.json.result.client_id }}"
+      client_secret: "{{ create_token_response.json.result.client_secret }}"
+      created: true
+  when: cf_token_id is not defined or cf_token_id == ""
+
+- name: Set service token result (existing)
+  ansible.builtin.set_fact:
+    service_token_result:
+      success: true
+      token_id: "{{ cf_token_id }}"
+      token_name: "{{ cf_token_name }}"
+      created: false
+  when: cf_token_id is defined and cf_token_id != ""
+
+- name: Display Service Token result
+  ansible.builtin.debug:
+    msg: "Service Token {{ 'created' if service_token_result.created else 'exists' }}: {{ cf_token_name }} ({{ service_token_result.token_id }})"
+    verbosity: 1
+
+- name: Warning about token credentials
+  ansible.builtin.debug:
+    msg: "WARNING: Service token credentials can only be retrieved once at creation time"
+    verbosity: 1
+  when: service_token_result.created

@@ -1,0 +1,27 @@
+---
+# Ansible Lint Configuration
+
+profile: production
+
+exclude_paths:
+  - .github/
+  - docs/
+  - examples/
+  - scripts/
+  - container/
+
+skip_list:
+  - yaml[line-length]  # Allow longer lines in some cases
+  - name[casing]       # Allow flexible task naming
+
+warn_list:
+  - experimental
+  - no-changed-when
+
+enable_list:
+  - yaml
+
+# Use default rules but be less strict for operator code
+quiet: false
+strict: false
+verbosity: 1

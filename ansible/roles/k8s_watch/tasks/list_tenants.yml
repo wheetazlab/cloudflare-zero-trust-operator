@@ -1,0 +1,23 @@
+---
+- name: List CloudflareZeroTrustTenant resources
+  kubernetes.core.k8s_info:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareZeroTrustTenant
+  register: tenant_list
+
+- name: Set cfzt_tenants fact
+  ansible.builtin.set_fact:
+    cfzt_tenants: "{{ tenant_list.resources }}"
+
+- name: Display tenant count
+  ansible.builtin.debug:
+    msg: "Found {{ cfzt_tenants | length }} CloudflareZeroTrustTenant(s)"
+    verbosity: 1
+
+- name: Display tenant details
+  ansible.builtin.debug:
+    msg: "Tenant: {{ item.metadata.namespace }}/{{ item.metadata.name }} (Account: {{ item.spec.accountId }})"
+    verbosity: 2
+  loop: "{{ cfzt_tenants }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"

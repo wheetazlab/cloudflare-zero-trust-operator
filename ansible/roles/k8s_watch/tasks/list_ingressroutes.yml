@@ -1,0 +1,43 @@
+---
+- name: List IngressRoute resources (all namespaces)
+  kubernetes.core.k8s_info:
+    api_version: traefik.io/v1alpha1
+    kind: IngressRoute
+  register: ingressroute_list_all
+  when: namespaces | length == 0
+
+- name: List IngressRoute resources (specific namespaces)
+  kubernetes.core.k8s_info:
+    api_version: traefik.io/v1alpha1
+    kind: IngressRoute
+    namespace: "{{ item }}"
+  register: ingressroute_list_specific
+  loop: "{{ namespaces }}"
+  when: namespaces | length > 0
+
+- name: Combine IngressRoute results (specific namespaces)
+  ansible.builtin.set_fact:
+    all_ingressroutes: "{{ ingressroute_list_specific.results | map(attribute='resources') | flatten }}"
+  when: namespaces | length > 0
+
+- name: Set all_ingressroutes fact (all namespaces)
+  ansible.builtin.set_fact:
+    all_ingressroutes: "{{ ingressroute_list_all.resources }}"
+  when: namespaces | length == 0
+
+- name: Filter IngressRoutes with cfzt enabled
+  ansible.builtin.set_fact:
+    cfzt_ingressroutes: "{{ all_ingressroutes | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined') | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true') | list }}"
+
+- name: Display IngressRoute count
+  ansible.builtin.debug:
+    msg: "Found {{ all_ingressroutes | length }} IngressRoute(s), {{ cfzt_ingressroutes | length }} with cfzt enabled"
+    verbosity: 1
+
+- name: Display enabled IngressRoute details
+  ansible.builtin.debug:
+    msg: "IngressRoute: {{ item.metadata.namespace }}/{{ item.metadata.name }} (hostname: {{ item.metadata.annotations['cfzt.cloudflare.com/hostname'] | default('N/A') }})"
+    verbosity: 2
+  loop: "{{ cfzt_ingressroutes }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"

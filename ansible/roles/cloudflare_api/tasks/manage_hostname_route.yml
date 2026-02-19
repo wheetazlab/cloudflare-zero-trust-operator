@@ -1,0 +1,81 @@
+---
+# Manage Cloudflare Tunnel Hostname Routes
+# Variables required:
+#   - cf_api_token: Cloudflare API token
+#   - cf_account_id: Cloudflare account ID
+#   - cf_tunnel_id: Cloudflare tunnel ID
+#   - cf_hostname: Hostname to configure
+#   - cf_origin_service: Origin service URL
+#   - cf_api_base: Cloudflare API base URL
+
+- name: Get current tunnel configuration
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}/configurations"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200, 404]
+    return_content: true
+  register: tunnel_config_response
+  retries: 3
+  delay: 5
+  until: tunnel_config_response.status in [200, 404]
+
+- name: Parse existing tunnel configuration
+  ansible.builtin.set_fact:
+    existing_config: "{{ tunnel_config_response.json.result.config if tunnel_config_response.status == 200 else {} }}"
+    existing_ingress: "{{ tunnel_config_response.json.result.config.ingress | default([]) if tunnel_config_response.status == 200 else [] }}"
+
+- name: Build hostname ingress rule
+  ansible.builtin.set_fact:
+    hostname_rule:
+      hostname: "{{ cf_hostname }}"
+      service: "{{ cf_origin_service }}"
+
+- name: Remove existing rule for this hostname
+  ansible.builtin.set_fact:
+    filtered_ingress: "{{ existing_ingress | rejectattr('hostname', 'equalto', cf_hostname) | list }}"
+
+- name: Add new hostname rule
+  ansible.builtin.set_fact:
+    updated_ingress: "{{ [hostname_rule] + filtered_ingress }}"
+
+- name: Ensure catch-all rule exists
+  ansible.builtin.set_fact:
+    final_ingress: "{{ updated_ingress + [{'service': 'http_status:404'}] if not (updated_ingress | selectattr('service', 'search', 'http_status') | list) else updated_ingress }}"
+
+- name: Build complete tunnel configuration
+  ansible.builtin.set_fact:
+    new_tunnel_config:
+      config:
+        ingress: "{{ final_ingress }}"
+
+- name: Update tunnel configuration
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/cfd_tunnel/{{ cf_tunnel_id }}/configurations"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ new_tunnel_config }}"
+    status_code: [200, 201]
+    return_content: true
+  register: update_response
+  retries: 3
+  delay: 5
+  until: update_response.status in [200, 201]
+
+- name: Set hostname route result
+  ansible.builtin.set_fact:
+    hostname_route_result:
+      success: true
+      hostname: "{{ cf_hostname }}"
+      tunnel_id: "{{ cf_tunnel_id }}"
+      config_version: "{{ update_response.json.result.config_version | default('unknown') }}"
+
+- name: Display hostname route result
+  ansible.builtin.debug:
+    msg: "Hostname route created/updated: {{ cf_hostname }} -> {{ cf_origin_service }}"
+    verbosity: 1

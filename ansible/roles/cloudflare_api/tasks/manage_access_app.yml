@@ -1,0 +1,88 @@
+---
+# Manage Cloudflare Access Application
+# Variables required:
+#   - cf_api_token: Cloudflare API token
+#   - cf_account_id: Cloudflare account ID
+#   - cf_app_name: Application name
+#   - cf_app_domain: Application domain
+#   - cf_app_id: (optional) Existing application ID for updates
+#   - cf_session_duration: Session duration (default: 24h)
+#   - cf_api_base: Cloudflare API base URL
+
+- name: Set default session duration
+  ansible.builtin.set_fact:
+    session_duration: "{{ cf_session_duration | default('24h') }}"
+
+- name: Build Access Application payload
+  ansible.builtin.set_fact:
+    access_app_payload:
+      name: "{{ cf_app_name }}"
+      domain: "{{ cf_app_domain }}"
+      type: "self_hosted"
+      session_duration: "{{ session_duration }}"
+      auto_redirect_to_identity: false
+      enable_binding_cookie: false
+      http_only_cookie_attribute: true
+      same_site_cookie_attribute: "lax"
+      logo_url: ""
+      skip_interstitial: false
+      app_launcher_visible: true
+
+- name: Create Access Application
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ access_app_payload }}"
+    status_code: [200, 201]
+    return_content: true
+  register: create_app_response
+  retries: 3
+  delay: 5
+  until: create_app_response.status in [200, 201]
+  when: cf_app_id is not defined or cf_app_id == ""
+
+- name: Update Access Application
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ access_app_payload }}"
+    status_code: [200, 201]
+    return_content: true
+  register: update_app_response
+  retries: 3
+  delay: 5
+  until: update_app_response.status in [200, 201]
+  when: cf_app_id is defined and cf_app_id != ""
+
+- name: Set application result (create)
+  ansible.builtin.set_fact:
+    access_app_result:
+      success: true
+      app_id: "{{ create_app_response.json.result.id }}"
+      app_name: "{{ cf_app_name }}"
+      app_domain: "{{ cf_app_domain }}"
+      created: true
+  when: cf_app_id is not defined or cf_app_id == ""
+
+- name: Set application result (update)
+  ansible.builtin.set_fact:
+    access_app_result:
+      success: true
+      app_id: "{{ cf_app_id }}"
+      app_name: "{{ cf_app_name }}"
+      app_domain: "{{ cf_app_domain }}"
+      created: false
+  when: cf_app_id is defined and cf_app_id != ""
+
+- name: Display Access Application result
+  ansible.builtin.debug:
+    msg: "Access Application {{ 'created' if access_app_result.created else 'updated' }}: {{ cf_app_name }} ({{ access_app_result.app_id }})"
+    verbosity: 1

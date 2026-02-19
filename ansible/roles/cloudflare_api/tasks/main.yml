@@ -1,0 +1,6 @@
+---
+# Cloudflare API role for interacting with Zero Trust APIs
+
+- name: Include appropriate task file
+  ansible.builtin.include_tasks: "{{ task_file }}"
+  when: task_file is defined

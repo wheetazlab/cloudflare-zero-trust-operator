@@ -1,3 +1,4 @@
+<!-- markdownlint-disable -->
 # Reconciliation Flow
 
 Detailed flow documentation showing how the operator reconciles resources once it's running.
@@ -34,7 +35,7 @@ sequenceDiagram
     participant Play1 as Play 1: Startup
     participant Play2 as Play 2: Reconcile
     
-    Entry->>Shell: while true; do
+    Entry->>Shell: Start infinite loop
     Shell->>Ansible: ansible-playbook reconcile.yml
     
     Ansible->>Play1: Execute Play 1

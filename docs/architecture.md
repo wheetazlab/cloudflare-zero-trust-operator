@@ -34,7 +34,7 @@ graph TB
         SRC[Source Code]
         ANSIBLE[Ansible Playbooks/Roles]
         DOCKER[Dockerfile]
-        SRC --> BUILD[make docker-build]
+        SRC --> BUILD[docker build]
         ANSIBLE --> BUILD
         DOCKER --> BUILD
         BUILD --> IMG[Container Image]
@@ -152,7 +152,7 @@ flowchart TD
 
 ```bash
 # Local build
-make docker-build
+docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
 # Multi-arch build (CI/CD)
 docker buildx build \

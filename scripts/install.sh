@@ -44,7 +44,7 @@ echo ""
 
 # Step 3: Build container image
 echo "3. Building container image..."
-make docker-build
+docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 echo -e "${GREEN}✓ Container image built${NC}"
 echo ""
 

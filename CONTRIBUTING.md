@@ -43,7 +43,7 @@ ansible-galaxy collection install -r ansible/requirements.yml
 
 ```bash
 # Create a kind cluster
-make kind-create
+kind create cluster --name cfzt-operator
 
 # Set environment variables
 export KUBECONFIG=~/.kube/config
@@ -70,16 +70,19 @@ ansible-playbook playbooks/reconcile.yml \
 
 ```bash
 # Run linting
-make lint
+cd ansible && ansible-lint playbooks/ roles/
 
 # Build container image
-make docker-build
+docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
 # Deploy to kind cluster
-make kind-deploy
+kind load docker-image ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest --name cfzt-operator
+kubectl apply -f config/crd/
+kubectl apply -f config/rbac/
+kubectl apply -f config/deployment/
 
 # View logs
-make logs
+kubectl logs -n cloudflare-zero-trust -l app=cloudflare-zero-trust-operator -f
 ```
 
 ### Making Changes
@@ -171,7 +174,7 @@ To add support for a new Cloudflare API:
 Currently, the project uses ansible-lint for linting:
 
 ```bash
-make lint
+cd ansible && ansible-lint playbooks/ roles/
 ```
 
 ### Integration Testing
@@ -180,8 +183,10 @@ Test against a real Kubernetes cluster:
 
 1. Deploy to kind:
    ```bash
-   make kind-create
-   make kind-deploy
+   kind create cluster --name cfzt-operator
+   kubectl apply -f config/crd/
+   kubectl apply -f config/rbac/
+   kubectl apply -f config/deployment/
    ```
 
 2. Create test resources:
@@ -194,7 +199,7 @@ Test against a real Kubernetes cluster:
    ```bash
    kubectl get cloudflarezerotrusttenants
    kubectl get httproutes
-   make logs
+   kubectl logs -n cloudflare-zero-trust -l app=cloudflare-zero-trust-operator -f
    ```
 
 ## Pull Request Guidelines
@@ -202,7 +207,7 @@ Test against a real Kubernetes cluster:
 ### Before Submitting
 
 - [ ] Code follows project structure and conventions
-- [ ] All tests pass (`make lint`)
+- [ ] All tests pass (`cd ansible && ansible-lint playbooks/ roles/`)
 - [ ] Documentation is updated
 - [ ] Examples are added/updated if applicable
 - [ ] Commit messages are clear and descriptive

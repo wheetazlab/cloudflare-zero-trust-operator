@@ -118,10 +118,13 @@ cd ansible
 ansible-playbook playbooks/reconcile.yml
 
 # Build container
-make docker-build
+docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
 # Deploy to kind cluster
-make kind-create kind-deploy
+kind create cluster --name cfzt-operator
+kubectl apply -f config/crd/
+kubectl apply -f config/rbac/
+kubectl apply -f config/deployment/
 ```
 
 ## Configuration

@@ -515,19 +515,21 @@ ansible-playbook playbooks/reconcile.yml -e "poll_interval=30" -e "watch_namespa
 Run Ansible lint:
 
 ```bash
-make lint
+cd ansible && ansible-lint playbooks/ roles/
 ```
 
 Build container locally:
 
 ```bash
-make docker-build
+docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 ```
 
 Deploy to kind cluster:
 
 ```bash
-make kind-deploy
+kubectl apply -f config/crd/
+kubectl apply -f config/rbac/
+kubectl apply -f config/deployment/
 ```
 
 ## Idempotency & Deletion

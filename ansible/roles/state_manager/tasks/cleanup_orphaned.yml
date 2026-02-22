@@ -1,7 +1,7 @@
 ---
-# Cleanup orphaned state ConfigMaps (IngressRoute no longer exists)
+# Cleanup orphaned state ConfigMaps (HTTPRoute no longer exists)
 # Inputs:
-#   - cfzt_ingressroutes: List of all IngressRoutes with cfzt enabled
+#   - cfzt_httproutes: List of all HTTPRoutes with cfzt enabled
 #   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
 
 - name: List all state ConfigMaps
@@ -14,14 +14,14 @@
       - app.kubernetes.io/component=state-tracker
   register: all_state_cms
 
-- name: Build list of expected ConfigMap names from IngressRoutes
+- name: Build list of expected ConfigMap names from HTTPRoutes
   ansible.builtin.set_fact:
     expected_cm_names: []
 
-- name: Generate expected ConfigMap name for each IngressRoute
+- name: Generate expected ConfigMap name for each HTTPRoute
   ansible.builtin.set_fact:
     expected_cm_names: "{{ expected_cm_names + ['cfzt-' + item.metadata.namespace + '-' + item.metadata.name] }}"
-  loop: "{{ cfzt_ingressroutes }}"
+  loop: "{{ cfzt_httproutes }}"
   loop_control:
     label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
 
@@ -33,7 +33,7 @@
   ansible.builtin.debug:
     msg: |
       Total state ConfigMaps: {{ all_state_cms.resources | length }}
-      Active IngressRoutes: {{ cfzt_ingressroutes | length }}
+      Active HTTPRoutes: {{ cfzt_httproutes | length }}
       Expected ConfigMaps: {{ expected_cm_names | length }}
       Orphaned ConfigMaps: {{ orphaned_cms | length }}
     verbosity: 1

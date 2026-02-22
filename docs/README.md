@@ -12,7 +12,7 @@ The operator consists of:
    - `CloudflareZeroTrustTemplate` - Reusable configuration templates for tunnel routes and Access applications
    - `CloudflareZeroTrustOperatorConfig` - Operator pod configuration (singleton)
 2. **Controller**: Ansible-based reconciliation loop that watches Kubernetes resources and manages Cloudflare
-3. **Template-driven configuration**: IngressRoutes use minimal annotations to select templates with full configuration
+3. **Template-driven configuration**: HTTPRoutes use minimal annotations to select templates with full configuration
 
 ### Component Overview
 
@@ -21,7 +21,7 @@ The operator consists of:
 │                    Kubernetes Cluster                        │
 │                                                              │
 │  ┌──────────────────────┐      ┌────────────────────────┐  │
-│  │ CloudflareZeroTrust  │      │  Traefik IngressRoute  │  │
+│  │ CloudflareZeroTrust  │      │  Gateway API HTTPRoute  │  │
 │  │      Tenant CR       │      │   (with annotations)   │  │
 │  └──────────────────────┘      └────────────────────────┘  │
 │            │                              │                  │
@@ -49,25 +49,25 @@ The operator consists of:
 
 ### Reconciliation Flow
 
-1. **Watch Phase**: List CloudflareZeroTrustTenant CRs and Traefik IngressRoute resources
-2. **Analysis Phase**: For each IngressRoute with cfzt annotations, determine desired Cloudflare state
+1. **Watch Phase**: List CloudflareZeroTrustTenant CRs and Gateway API HTTPRoute resources
+2. **Analysis Phase**: For each HTTPRoute with cfzt annotations, determine desired Cloudflare state
 3. **Sync Phase**: Call Cloudflare APIs to create/update/delete resources
-4. **Update Phase**: Patch IngressRoute annotations with Cloudflare resource IDs
+4. **Update Phase**: Patch HTTPRoute annotations with Cloudflare resource IDs
 5. **Status Phase**: Update CloudflareZeroTrustTenant status with sync results
 
-## IngressRoute Configuration
+## HTTPRoute Configuration
 
 ### Template-Based Approach (Recommended)
 
-The operator uses **templates** to configure tunnel routes and Access applications. This keeps IngressRoutes clean and enables reusable configurations.
+The operator uses **templates** to configure tunnel routes and Access applications. This keeps HTTPRoutes clean and enables reusable configurations.
 
-#### Step 1: IngressRoute Annotations (Minimal)
+#### Step 1: HTTPRoute Annotations (Minimal)
 
 Only specify what's unique to each route:
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: longhorn
   annotations:
@@ -128,7 +128,7 @@ Settings are resolved in this order:
 2. **Tenant defaults** - Fallback for any settings not in template
 3. **Default values** - Built-in defaults if not in template or tenant
 
-Templates are **not overridable** by IngressRoute annotations - annotations only select tenant and template.
+Templates are **not overridable** by HTTPRoute annotations - annotations only select tenant and template.
 
 ### Built-in Templates
 
@@ -175,7 +175,7 @@ metadata:
   name: secure-internal-app
   namespace: default
 spec:
-  # Optional: Default tenant reference (can be overridden in IngressRoute)
+  # Optional: Default tenant reference (can be overridden in HTTPRoute)
   tenantRef: "prod-tenant"
   
   # Origin service configuration
@@ -250,11 +250,11 @@ spec:
 - **enabled** (bool, default: false): Create service token for machine-to-machine auth
 - **duration** (string, default: "8760h"): Token lifetime
 
-### Example IngressRoute with Template
+### Example HTTPRoute with Template
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: longhorn
   namespace: default
@@ -311,7 +311,7 @@ spec:
 - **credentialRef** (required): Reference to Kubernetes Secret containing API token
   - **name**: Secret name
   - **key**: Key within the secret containing the API token
-- **defaults**: Default values for IngressRoutes (overridable via annotations)
+- **defaults**: Default values for HTTPRoutes (overridable via annotations)
   - **sessionDuration**: Default Access Application session duration (e.g., "24h", "8h")
   - **originService**: Default origin service URL (auto-detects HTTP/HTTPS from scheme)
   - **httpRedirect**: Automatically redirect HTTP to HTTPS at Cloudflare edge (default: true)
@@ -336,7 +336,7 @@ status:
       reason: ReconcileSuccess
       message: "Successfully reconciled"
   summary:
-    managedIngressRoutes: 5
+    managedHTTPRoutes: 5
     hostnameRoutes: 5
     accessApplications: 3
     accessPolicies: 4
@@ -405,7 +405,7 @@ DELETE https://api.cloudflare.com/client/v4/accounts/{account_id}/access/service
 ### Prerequisites
 
 - Kubernetes cluster (1.23+)
-- Traefik ingress controller with IngressRoute CRD installed
+- Any Gateway API-compatible ingress controller
 - Cloudflare account with Zero Trust enabled
 - Cloudflare API token with permissions:
   - Account.Cloudflare Tunnel:Edit
@@ -450,16 +450,16 @@ kubectl apply -f examples/templates.yaml
 kubectl apply -f examples/tenant.yaml
 ```
 
-6. **Annotate your IngressRoutes**:
+6. **Annotate your HTTPRoutes**:
 
 ```bash
 # Simple: Just enable with hostname (uses 'default' template)
-kubectl annotate ingressroute my-app \
+kubectl annotate httproute my-app \
   cfzt.cloudflare.com/enabled="true" \
   cfzt.cloudflare.com/hostname="myapp.example.com"
 
 # With template: Use a specific template
-kubectl annotate ingressroute secure-app \
+kubectl annotate httproute secure-app \
   cfzt.cloudflare.com/enabled="true" \
   cfzt.cloudflare.com/hostname="secure.example.com" \
   cfzt.cloudflare.com/template="secure-internal-app"
@@ -541,7 +541,7 @@ The operator is designed to be idempotent:
 
 ### Deletion Handling
 
-When an IngressRoute is deleted or annotations are removed:
+When an HTTPRoute is deleted or annotations are removed:
 
 1. Operator detects the removal during next reconciliation
 2. Retrieves Cloudflare resource IDs from stored state (if annotations still exist)
@@ -550,11 +550,11 @@ When an IngressRoute is deleted or annotations are removed:
    - Access policies
    - Access applications
    - Hostname routes
-4. Removes state annotations from IngressRoute (if still exists)
+4. Removes state annotations from HTTPRoute (if still exists)
 
 ### Finalizers
 
-The operator uses Kubernetes finalizers on managed IngressRoutes to ensure clean deletion of Cloudflare resources before the IngressRoute is removed from etcd.
+The operator uses Kubernetes finalizers on managed HTTPRoutes to ensure clean deletion of Cloudflare resources before the HTTPRoute is removed from etcd.
 
 ## Extension Points
 
@@ -595,18 +595,18 @@ kubectl get cloudflarezerotrusttenants -o yaml
 ### Verify annotations
 
 ```bash
-kubectl get ingressroute my-app -o jsonpath='{.metadata.annotations}' | jq
+kubectl get httproute my-app -o jsonpath='{.metadata.annotations}' | jq
 ```
 
 ### Common Issues
 
-**Issue**: Operator not detecting IngressRoute changes
-- **Solution**: Check WATCH_NAMESPACES includes the IngressRoute namespace
-- **Solution**: Verify IngressRoute has `cfzt.cloudflare.com/enabled: "true"`
+**Issue**: Operator not detecting HTTPRoute changes
+- **Solution**: Check WATCH_NAMESPACES includes the HTTPRoute namespace
+- **Solution**: Verify HTTPRoute has `cfzt.cloudflare.com/enabled: "true"`
 
 **Issue**: Cloudflare API rate limiting
 - **Solution**: Increase POLL_INTERVAL_SECONDS
-- **Solution**: Reduce number of managed IngressRoutes per tenant
+- **Solution**: Reduce number of managed HTTPRoutes per tenant
 
 **Issue**: Access Application not created
 - **Solution**: Verify `cfzt.cloudflare.com/accessApp: "true"` annotation
@@ -617,7 +617,7 @@ kubectl get ingressroute my-app -o jsonpath='{.metadata.annotations}' | jq
 
 - **API Tokens**: Store in Kubernetes Secrets, never in annotations or ConfigMaps
 - **Service Token Secrets**: Automatically created with generated names, use RBAC to restrict access
-- **RBAC**: Operator requires read/write access to IngressRoutes and tenant CRs, read access to Secrets
+- **RBAC**: Operator requires read/write access to HTTPRoutes and tenant CRs, read access to Secrets
 - **Namespace Isolation**: Use separate tenants per namespace for multi-tenancy
 
 ## License

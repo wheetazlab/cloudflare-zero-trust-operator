@@ -1,18 +1,18 @@
 ---
-# Check if IngressRoute needs reconciliation based on state
+# Check if HTTPRoute needs reconciliation based on state
 # Inputs:
-#   - ingressroute: The IngressRoute object
+#   - httproute: The HTTPRoute object
 #   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
 # Outputs:
 #   - needs_reconciliation: Boolean - true if reconciliation needed
 #   - state_configmap_name: Name of the state ConfigMap
 #   - stored_annotation_hash: Previous annotation hash (if exists)
 
-- name: Extract IngressRoute metadata
+- name: Extract HTTPRoute metadata
   ansible.builtin.set_fact:
-    ir_name: "{{ ingressroute.metadata.name }}"
-    ir_namespace: "{{ ingressroute.metadata.namespace }}"
-    ir_uid: "{{ ingressroute.metadata.uid }}"
+    ir_name: "{{ httproute.metadata.name }}"
+    ir_namespace: "{{ httproute.metadata.namespace }}"
+    ir_uid: "{{ httproute.metadata.uid }}"
 
 - name: Generate ConfigMap name for state tracking
   ansible.builtin.set_fact:
@@ -20,7 +20,7 @@
 
 - name: Extract all cfzt.cloudflare.com annotations
   ansible.builtin.set_fact:
-    cfzt_annotations: "{{ ingressroute.metadata.annotations | dict2items | selectattr('key', 'match', '^cfzt\\.cloudflare\\.com/') | items2dict }}"
+    cfzt_annotations: "{{ httproute.metadata.annotations | dict2items | selectattr('key', 'match', '^cfzt\\.cloudflare\\.com/') | items2dict }}"
 
 - name: Calculate current annotation hash
   ansible.builtin.set_fact:
@@ -29,7 +29,7 @@
 - name: Debug annotation hash
   ansible.builtin.debug:
     msg: |
-      IngressRoute: {{ ir_namespace }}/{{ ir_name }}
+      HTTPRoute: {{ ir_namespace }}/{{ ir_name }}
       Annotation Hash: {{ current_annotation_hash }}
     verbosity: 1
 

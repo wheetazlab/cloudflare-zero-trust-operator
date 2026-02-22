@@ -12,12 +12,12 @@
         status: "True"
         lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
         reason: "ReconcileSuccess"
-        message: "Successfully reconciled {{ tenant_ingressroutes | length }} IngressRoute(s)"
+        message: "Successfully reconciled {{ tenant_httproutes | length }} HTTPRoute(s)"
 
 - name: Build status summary
   ansible.builtin.set_fact:
     status_summary:
-      managedIngressRoutes: "{{ tenant_ingressroutes | length }}"
+      managedHTTPRoutes: "{{ tenant_httproutes | length }}"
       hostnameRoutes: "{{ count_hostname_routes | int }}"
       accessApplications: "{{ count_access_apps | int }}"
       accessPolicies: "{{ count_access_policies | int }}"

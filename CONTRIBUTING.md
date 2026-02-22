@@ -151,7 +151,7 @@ To add support for a new Cloudflare API:
      register: create_response
    ```
 
-2. Update the reconciliation logic in `ansible/roles/tenant_reconcile/tasks/reconcile_ingressroute.yml`
+2. Update the reconciliation logic in `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
 
 3. Add new annotations to documentation
 
@@ -160,7 +160,7 @@ To add support for a new Cloudflare API:
 ### Adding New Annotations
 
 1. Document the annotation in `docs/README.md`
-2. Parse the annotation in `ansible/roles/tenant_reconcile/tasks/reconcile_ingressroute.yml`
+2. Parse the annotation in `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
 3. Implement the logic
 4. Add examples
 
@@ -187,13 +187,13 @@ Test against a real Kubernetes cluster:
 2. Create test resources:
    ```bash
    kubectl apply -f examples/tenant.yaml
-   kubectl apply -f examples/ingressroute.yaml
+   kubectl apply -f examples/httproute.yaml
    ```
 
 3. Verify behavior:
    ```bash
    kubectl get cloudflarezerotrusttenants
-   kubectl get ingressroutes
+   kubectl get httproutes
    make logs
    ```
 

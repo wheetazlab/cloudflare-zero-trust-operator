@@ -72,12 +72,11 @@ rules:
     resourceNames:
       - cloudflare-zero-trust-operator
   
-  # Traefik IngressRoute permissions
+  # Gateway API HTTPRoute permissions
   - apiGroups:
-      - traefik.io
-      - traefik.containo.us
+      - gateway.networking.k8s.io
     resources:
-      - ingressroutes
+      - httproutes
     verbs:
       - get
       - list

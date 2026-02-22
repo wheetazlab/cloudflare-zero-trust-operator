@@ -1,7 +1,7 @@
 ---
 # Example 1: Using default template (public route)
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: public-app
   namespace: default
@@ -18,21 +18,20 @@ metadata:
     # Optional: Specify template (uses 'default' template if omitted)
     # cfzt.cloudflare.com/template: "default"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`app.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "app.example.com"
+  rules:
+    - backendRefs:
         - name: public-app
           port: 80
-  tls:
-    secretName: app-tls
 
 ---
 # Example 2: Secure internal app with Azure AD authentication
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: longhorn
   namespace: default
@@ -44,22 +43,21 @@ metadata:
     # Use template with Access Application and existing Azure AD policy
     cfzt.cloudflare.com/template: "secure-internal-app"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`longhorn.wheethome.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "longhorn.wheethome.com"
+  rules:
+    - backendRefs:
         - name: longhorn-frontend
           namespace: longhorn-system
           port: 80
-  tls:
-    secretName: longhorn-tls
 
 ---
 # Example 3: gRPC backend service
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: grpc-api
   namespace: grpc-namespace
@@ -68,21 +66,20 @@ metadata:
     cfzt.cloudflare.com/hostname: "grpc.example.com"
     cfzt.cloudflare.com/template: "grpc-backend"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`grpc.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "grpc.example.com"
+  rules:
+    - backendRefs:
         - name: grpc-service
           port: 443
-  tls:
-    secretName: grpc-tls
 
 ---
 # Example 4: Public API with service token
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: api-backend
   namespace: api-namespace
@@ -91,21 +88,20 @@ metadata:
     cfzt.cloudflare.com/hostname: "api.example.com"
     cfzt.cloudflare.com/template: "api-with-service-token"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`api.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "api.example.com"
+  rules:
+    - backendRefs:
         - name: api-backend
           port: 8000
-  tls:
-    secretName: api-tls
 
 ---
 # Example 5: Admin panel with strict security
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: admin-panel
   namespace: admin-namespace
@@ -114,13 +110,12 @@ metadata:
     cfzt.cloudflare.com/hostname: "admin.example.com"
     cfzt.cloudflare.com/template: "admin-panel"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`admin.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "admin.example.com"
+  rules:
+    - backendRefs:
         - name: admin-panel
           port: 3000
-  tls:
-    secretName: admin-tls

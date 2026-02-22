@@ -1,0 +1,43 @@
+---
+- name: List HTTPRoute resources (all namespaces)
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+  register: httproute_list_all
+  when: namespaces | length == 0
+
+- name: List HTTPRoute resources (specific namespaces)
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    namespace: "{{ item }}"
+  register: httproute_list_specific
+  loop: "{{ namespaces }}"
+  when: namespaces | length > 0
+
+- name: Combine HTTPRoute results (specific namespaces)
+  ansible.builtin.set_fact:
+    all_httproutes: "{{ httproute_list_specific.results | map(attribute='resources') | flatten }}"
+  when: namespaces | length > 0
+
+- name: Set all_httproutes fact (all namespaces)
+  ansible.builtin.set_fact:
+    all_httproutes: "{{ httproute_list_all.resources }}"
+  when: namespaces | length == 0
+
+- name: Filter HTTPRoutes with cfzt enabled
+  ansible.builtin.set_fact:
+    cfzt_httproutes: "{{ all_httproutes | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined') | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true') | list }}"
+
+- name: Display HTTPRoute count
+  ansible.builtin.debug:
+    msg: "Found {{ all_httproutes | length }} HTTPRoute(s), {{ cfzt_httproutes | length }} with cfzt enabled"
+    verbosity: 1
+
+- name: Display enabled HTTPRoute details
+  ansible.builtin.debug:
+    msg: "HTTPRoute: {{ item.metadata.namespace }}/{{ item.metadata.name }} (hostname: {{ item.metadata.annotations['cfzt.cloudflare.com/hostname'] | default('N/A') }})"
+    verbosity: 2
+  loop: "{{ cfzt_httproutes }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"

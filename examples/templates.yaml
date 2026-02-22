@@ -1,6 +1,6 @@
 ---
 # Default Template - Public tunnel route with HTTPS origin
-# This is used when no template is specified in IngressRoute
+# This is used when no template is specified in HTTPRoute
 apiVersion: cfzt.cloudflare.com/v1alpha1
 kind: CloudflareZeroTrustTemplate
 metadata:

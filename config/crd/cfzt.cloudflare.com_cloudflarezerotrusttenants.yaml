@@ -162,9 +162,9 @@ spec:
                   type: object
                   description: Summary of managed resources
                   properties:
-                    managedIngressRoutes:
+                    managedHTTPRoutes:
                       type: integer
-                      description: Number of IngressRoutes managed by this tenant
+                      description: Number of HTTPRoutes managed by this tenant
                     hostnameRoutes:
                       type: integer
                       description: Number of tunnel hostname routes
@@ -186,9 +186,9 @@ spec:
         - name: Tunnel
           type: string
           jsonPath: .spec.tunnelId
-        - name: IngressRoutes
+        - name: HTTPRoutes
           type: integer
-          jsonPath: .status.summary.managedIngressRoutes
+          jsonPath: .status.summary.managedHTTPRoutes
         - name: Last Sync
           type: date
           jsonPath: .status.lastSyncTime

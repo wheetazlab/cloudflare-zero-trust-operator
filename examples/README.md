@@ -31,12 +31,12 @@ This creates 7 templates:
 - **simple-email-allow**: Creates simple policy with email allowlist (backward compatible)
 - **custom-origin**: Custom backend service with specific TLS settings
 
-### 3. Create IngressRoutes
+### 3. Create HTTPRoutes
 
 Use simplified annotations to reference templates:
 
 ```bash
-kubectl apply -f ingressroute-with-templates.yaml
+kubectl apply -f httproute-with-templates.yaml
 ```
 
 ## Template Architecture
@@ -46,8 +46,8 @@ kubectl apply -f ingressroute-with-templates.yaml
 **Before templates** (annotation-heavy):
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   annotations:
     cfzt.cloudflare.com/enabled: "true"
@@ -64,8 +64,8 @@ metadata:
 **With templates** (clean):
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   annotations:
     cfzt.cloudflare.com/enabled: "true"
@@ -117,11 +117,11 @@ spec:
       - "another-policy-id-here"  # Optional: multiple policies
 ```
 
-### In IngressRoute
+### In HTTPRoute
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: longhorn
   annotations:
@@ -197,25 +197,25 @@ spec:
 
 - **tenant.yaml**: CloudflareZeroTrustTenant example with full configuration
 - **templates.yaml**: 7 built-in templates for common use cases
-- **ingressroute-with-templates.yaml**: Example IngressRoutes using templates
-- **ingressroute.yaml**: Old-style examples with many annotations (deprecated)
+- **httproute-with-templates.yaml**: Example HTTPRoutes using templates
+- **httproute.yaml**: Old-style examples with many annotations (deprecated)
 
 ## Migration Guide
 
 ### From Annotation-Heavy to Templates
 
-1. Identify common patterns in your IngressRoute annotations
+1. Identify common patterns in your HTTPRoute annotations
 2. Create templates for each pattern
-3. Update IngressRoutes to reference templates:
+3. Update HTTPRoutes to reference templates:
    - Remove: all config annotations (originService, TLS settings, Access settings)
    - Keep: enabled, hostname, template, tenant
-4. Deploy templates before updating IngressRoutes
+4. Deploy templates before updating HTTPRoutes
 
 ### Backward Compatibility
 
 The operator still supports the old annotation-based approach, but templates are **strongly recommended** for:
 
-- Cleaner IngressRoutes
+- Cleaner HTTPRoutes
 - Consistent configuration
 - Easier updates (change template, all apps update)
 - DRY principle

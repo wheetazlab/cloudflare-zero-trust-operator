@@ -16,11 +16,11 @@ Complete architecture documentation for the Cloudflare Zero Trust Operator, from
 
 ## Overview
 
-The Cloudflare Zero Trust Operator is a Kubernetes-native operator that manages Cloudflare Zero Trust resources (tunnel routes, Access applications, policies, and service tokens) by watching Traefik IngressRoute annotations.
+The Cloudflare Zero Trust Operator is a Kubernetes-native operator that manages Cloudflare Zero Trust resources (tunnel routes, Access applications, policies, and service tokens) by watching Traefik HTTPRoute annotations.
 
 **Key Design Principles:**
 
-- **Annotation-driven**: Configuration through IngressRoute annotations
+- **Annotation-driven**: Configuration through HTTPRoute annotations
 - **Idempotent**: Safe to run repeatedly
 - **Multi-tenant**: Support multiple Cloudflare accounts
 - **Declarative**: Desired state defined in Kubernetes
@@ -69,7 +69,7 @@ graph TB
         
         subgraph "Kubernetes Resources"
             TENANT[CloudflareZeroTrustTenant CR]
-            IR[IngressRoute]
+            IR[HTTPRoute]
             SECRET[Secrets]
         end
         
@@ -190,9 +190,9 @@ graph TB
         subgraph "Application Namespaces"
             TENANT1[Tenant CR]
             SEC1[API Token Secret]
-            IR1[IngressRoute 1]
-            IR2[IngressRoute 2]
-            IR3[IngressRoute 3]
+            IR1[HTTPRoute 1]
+            IR2[HTTPRoute 2]
+            IR3[HTTPRoute 3]
             
             TENANT1 -.references.-> SEC1
         end
@@ -262,7 +262,7 @@ graph LR
     subgraph "Permissions"
         CR --> P1[Read/Write: CloudflareZeroTrustTenant]
         CR --> P1B[Read/Write: OperatorConfig]
-        CR --> P2[Read/Write/Patch: IngressRoute]
+        CR --> P2[Read/Write/Patch: HTTPRoute]
         CR --> P3[Read: Secrets]
         CR --> P4[Create/Update: Secrets]
         CR --> P5[Create: Events]
@@ -273,7 +273,7 @@ graph LR
 **ClusterRole Permissions**:
 - CloudflareZeroTrustTenant: get, list, watch, update status
 - CloudflareZeroTrustOperatorConfig: get, list, watch, update status (for self-configuration)
-- IngressRoute: get, list, watch, patch, update
+- HTTPRoute: get, list, watch, patch, update
 - Secrets: get, list, watch, create, update, delete
 - ConfigMaps: get, list, watch, create, update, patch, delete (for state tracking)
 - Deployments: get, list, patch, update (restricted to operator's own deployment)
@@ -327,7 +327,7 @@ spec:
   - `http2Origin`: Use HTTP/2 for origin connection (default: false) - useful for gRPC backends
   - `matchSNIToHost`: Match SNI to Host header automatically (default: false)
 
-**Note**: TLS settings can be overridden per-IngressRoute using annotations (e.g., `cfzt.cloudflare.com/no-tls-verify`, `cfzt.cloudflare.com/tls-timeout`, etc.)
+**Note**: TLS settings can be overridden per-HTTPRoute using annotations (e.g., `cfzt.cloudflare.com/no-tls-verify`, `cfzt.cloudflare.com/tls-timeout`, etc.)
 
 **Operator Pod Configuration** (via CloudflareZeroTrustOperatorConfig CR):
 - Dynamically controls operator pod scheduling and resources without redeployment
@@ -398,7 +398,7 @@ sequenceDiagram
     loop Every POLL_INTERVAL_SECONDS
         Loop->>Ansible: ansible-playbook reconcile.yml
         Ansible->>Ansible: List Tenants
-        Ansible->>Ansible: List IngressRoutes
+        Ansible->>Ansible: List HTTPRoutes
         Ansible->>Ansible: Reconcile Each Tenant
         Ansible-->>Loop: Return (success/failure)
         Loop->>Loop: Log Result
@@ -589,16 +589,16 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     START([Reconciliation Triggered]) --> LIST_TENANTS[List CloudflareZeroTrustTenant CRs]
-    LIST_TENANTS --> LIST_IR[List IngressRoutes with cfzt.cloudflare.com/enabled=true]
+    LIST_TENANTS --> LIST_IR[List HTTPRoutes with cfzt.cloudflare.com/enabled=true]
     
     LIST_IR --> TENANT_LOOP{For Each Tenant}
     
     TENANT_LOOP -->|Next Tenant| GET_CREDS[Get API Token from Secret]
     TENANT_LOOP -->|Done| UPDATE_STATUS[Update All Tenant Statuses]
     
-    GET_CREDS --> FILTER_IR[Filter IngressRoutes for This Tenant]
+    GET_CREDS --> FILTER_IR[Filter HTTPRoutes for This Tenant]
     
-    FILTER_IR --> IR_LOOP{For Each IngressRoute}
+    FILTER_IR --> IR_LOOP{For Each HTTPRoute}
     
     IR_LOOP -->|Next IR| PARSE_ANNO[Parse Annotations]
     IR_LOOP -->|Done| TENANT_LOOP
@@ -614,7 +614,7 @@ flowchart TD
     
     TOKEN_CHECK -->|Yes| CREATE_TOKEN[Create Service Token]
     CREATE_TOKEN --> CREATE_SECRET[Create K8s Secret with Token]
-    CREATE_SECRET --> PATCH_IR[Patch IngressRoute Annotations]
+    CREATE_SECRET --> PATCH_IR[Patch HTTPRoute Annotations]
     
     TOKEN_CHECK -->|No| PATCH_IR
     
@@ -632,7 +632,7 @@ flowchart TD
 
 ```mermaid
 graph TB
-    subgraph "IngressRoute Annotations (State Storage)"
+    subgraph "HTTPRoute Annotations (State Storage)"
         A1[cfzt.cloudflare.com/enabled: 'true']
         A2[cfzt.cloudflare.com/hostname: 'app.example.com']
         A3[cfzt.cloudflare.com/hostnameRouteId: 'tunnel-id']
@@ -660,7 +660,7 @@ graph TB
 - **User annotations**: Define desired state (enabled, hostname, accessApp, etc.)
 - **Operator annotations**: Track Cloudflare resource IDs for updates/deletions
 - **Idempotency**: Use stored IDs to update existing resources instead of creating duplicates
-- **Deletion**: Use stored IDs to clean up Cloudflare resources when IngressRoute is deleted
+- **Deletion**: Use stored IDs to clean up Cloudflare resources when HTTPRoute is deleted
 
 ## Security Architecture
 
@@ -708,12 +708,12 @@ graph TB
 2. **Service Token Secrets** (Operator-generated):
    - Created when `serviceToken: true`
    - Contains `client_id` and `client_secret`
-   - Named: `{ingressroute-name}-cfzt-service-token`
+   - Named: `{httproute-name}-cfzt-service-token`
    - Used by applications for machine-to-machine auth
 
 3. **Annotations** (Public metadata):
    - Only store resource IDs, never credentials
-   - Visible to anyone with IngressRoute read access
+   - Visible to anyone with HTTPRoute read access
 
 ### RBAC Security Model
 
@@ -725,13 +725,13 @@ graph TB
     
     subgraph "Can Read"
         R1[CloudflareZeroTrustTenant]
-        R2[IngressRoute]
+        R2[HTTPRoute]
         R3[Secrets]
     end
     
     subgraph "Can Write"
         W1[CloudflareZeroTrustTenant status]
-        W2[IngressRoute annotations]
+        W2[HTTPRoute annotations]
         W3[Service Token Secrets]
         W4[Events]
         W5[ConfigMaps - State Tracking]
@@ -951,8 +951,8 @@ The Cloudflare Zero Trust Operator follows a straightforward architecture:
 
 1. **Build**: Container with Ansible + Python dependencies
 2. **Deploy**: Kubernetes Deployment with RBAC
-3. **Runtime**: Continuous reconciliation loop watching IngressRoutes
+3. **Runtime**: Continuous reconciliation loop watching HTTPRoutes
 4. **Integrate**: Call Cloudflare APIs to create/update/delete resources
-5. **Track**: Store state in IngressRoute annotations
+5. **Track**: Store state in HTTPRoute annotations
 
 The entire system is designed for simplicity, maintainability, and GitOps workflows.

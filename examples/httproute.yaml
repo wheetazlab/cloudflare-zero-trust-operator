@@ -1,7 +1,7 @@
 ---
-# Example IngressRoute with basic hostname route only
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+# Example HTTPRoute with basic hostname route only
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: myapp-basic
   namespace: default
@@ -15,22 +15,23 @@ metadata:
     # Public hostname to configure
     cfzt.cloudflare.com/hostname: "myapp.example.com"
     
-    # Optional: Override origin service (default from IngressRoute spec or tenant defaults)
+    # Optional: Override origin service (default from HTTPRoute spec or tenant defaults)
     # cfzt.cloudflare.com/originService: "http://myapp.default.svc:8080"
 spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`myapp.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "myapp.example.com"
+  rules:
+    - backendRefs:
         - name: myapp
           port: 8080
 
 ---
-# Example IngressRoute with Access Application and Policy
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+# Example HTTPRoute with Access Application and Policy
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: admin-app
   namespace: default
@@ -48,19 +49,20 @@ metadata:
     # Session duration
     cfzt.cloudflare.com/sessionDuration: "8h"
 spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`admin.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "admin.example.com"
+  rules:
+    - backendRefs:
         - name: admin-panel
           port: 80
 
 ---
-# Example IngressRoute with Access Application using Groups
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+# Example HTTPRoute with Access Application using Groups
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: dashboard-app
   namespace: default
@@ -78,19 +80,20 @@ metadata:
     # Session duration
     cfzt.cloudflare.com/sessionDuration: "12h"
 spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`dashboard.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "dashboard.example.com"
+  rules:
+    - backendRefs:
         - name: dashboard
           port: 3000
 
 ---
-# Example IngressRoute with Service Token for machine-to-machine auth
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+# Example HTTPRoute with Service Token for machine-to-machine auth
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: api-service
   namespace: default
@@ -108,19 +111,20 @@ metadata:
     # Optional: Also allow specific emails
     cfzt.cloudflare.com/allowEmails: "developer@example.com"
 spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`api.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "api.example.com"
+  rules:
+    - backendRefs:
         - name: api-backend
           port: 8000
 
 ---
-# Example IngressRoute with all features
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+# Example HTTPRoute with all features
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: full-featured-app
   namespace: default
@@ -139,21 +143,16 @@ metadata:
     # Service Token for machine-to-machine
     cfzt.cloudflare.com/serviceToken: "true"
 spec:
-  entryPoints:
-    - web
-    - websecure
-  routes:
-    - match: Host(`app.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "app.example.com"
+  rules:
+    - backendRefs:
         - name: app-service
           namespace: app-namespace
           port: 8080
-      middlewares:
-        - name: compress
-        - name: rate-limit
-  tls:
-    secretName: app-tls
 
 ---
 ###############################################################################
@@ -162,8 +161,8 @@ spec:
 
 # Example: HTTPS backend with self-signed certificate
 # Use noTLSVerify to skip certificate validation
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: https-self-signed-backend
   namespace: default
@@ -178,22 +177,21 @@ metadata:
     # Skip TLS verification for self-signed certificates
     cfzt.cloudflare.com/no-tls-verify: "true"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`secure-app.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "secure-app.example.com"
+  rules:
+    - backendRefs:
         - name: secure-app
           port: 8443
-  tls:
-    secretName: secure-app-tls
 
 ---
 # Example: HTTPS backend with custom SNI hostname and timeout
 # Useful when the origin server expects a specific hostname in SNI
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: custom-sni-backend
   namespace: default
@@ -214,23 +212,22 @@ metadata:
     # Match SNI to the Host header
     cfzt.cloudflare.com/match-sni-to-host: "true"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`custom-sni.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "custom-sni.example.com"
+  rules:
+    - backendRefs:
         - name: backend
           namespace: backend-namespace
           port: 8443
-  tls:
-    secretName: backend-tls
 
 ---
 # Example: HTTP/2 backend with disabled HTTP redirect
 # Use HTTP/2 for better performance and disable automatic HTTP to HTTPS redirect
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: http2-backend
   namespace: default
@@ -251,23 +248,22 @@ metadata:
     # Skip TLS verification if needed
     cfzt.cloudflare.com/no-tls-verify: "true"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`http2-app.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "http2-app.example.com"
+  rules:
+    - backendRefs:
         - name: grpc-service
           namespace: grpc-namespace
           port: 443
-  tls:
-    secretName: grpc-tls
 
 ---
 # Example: Production HTTPS backend with CA pool
 # Most secure configuration with custom CA certificate validation
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: production-https-backend
   namespace: production
@@ -289,14 +285,13 @@ metadata:
     cfzt.cloudflare.com/accessApp: "true"
     cfzt.cloudflare.com/allowGroups: "Production-Access"
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - match: Host(`prod-app.example.com`)
-      kind: Rule
-      services:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "prod-app.example.com"
+  rules:
+    - backendRefs:
         - name: prod-backend
           namespace: production
           port: 8443
-  tls:
-    secretName: prod-backend-tls

@@ -24,7 +24,7 @@ Once the operator pod is running, the `entrypoint.sh` script enters an infinite 
 - **Poll-based**: Runs every `POLL_INTERVAL_SECONDS` (default: 60)
 - **Sequential**: Processes tenants one at a time
 - **Idempotent**: Safe to run repeatedly
-- **Stateful**: Uses ConfigMaps to track IngressRoute state and avoid unnecessary Cloudflare API calls
+- **Stateful**: Uses ConfigMaps to track HTTPRoute state and avoid unnecessary Cloudflare API calls
 - **Change detection**: Only contacts Cloudflare API when cfzt annotations change
 
 ## State Management
@@ -33,8 +33,8 @@ The operator implements **stateful reconciliation** to minimize Cloudflare API c
 
 ### State Tracking Mechanism
 
-**ConfigMap per IngressRoute**:
-- **Name**: `cfzt-{namespace}-{ingressroute-name}` (in operator namespace)
+**ConfigMap per HTTPRoute**:
+- **Name**: `cfzt-{namespace}-{httproute-name}` (in operator namespace)
 - **Purpose**: Track annotation state and Cloudflare resource IDs
 - **Avoids conflicts**: Namespace prefix handles duplicate names across namespaces
 
@@ -44,21 +44,21 @@ data:
   annotation_hash: "sha256 hash of all cfzt.cloudflare.com/* annotations"
   cloudflare_ids: '{"tunnel_id": "...", "access_app_id": "...", ...}'
   last_sync_time: "2026-02-18T10:00:00Z"
-  ingressroute_namespace: "default"
-  ingressroute_name: "myapp"
+  httproute_namespace: "default"
+  httproute_name: "myapp"
 ```
 
 **Change Detection**:
 1. Calculate SHA256 hash of all `cfzt.cloudflare.com/*` annotations
 2. Compare with stored hash in ConfigMap
 3. Only reconcile if:
-   - ConfigMap doesn't exist (new IngressRoute)
+   - ConfigMap doesn't exist (new HTTPRoute)
    - Annotation hash differs (configuration changed)
 4. Skip reconciliation if hash matches (no changes)
 
 **Garbage Collection**:
 - After each reconciliation cycle, cleanup orphaned ConfigMaps
-- Orphaned = ConfigMap exists but IngressRoute no longer exists
+- Orphaned = ConfigMap exists but HTTPRoute no longer exists
 - Prevents ConfigMap accumulation over time
 
 ## Logging Configuration
@@ -317,7 +317,7 @@ sequenceDiagram
     Note over Play1: Display startup info<br/>Call reconciliation_loop role
     
     Play1->>Play2: Include Play 2
-    Note over Play2: List tenants<br/>List IngressRoutes<br/>Reconcile each tenant
+    Note over Play2: List tenants<br/>List HTTPRoutes<br/>Reconcile each tenant
     
     Play2-->>Ansible: Return (exit code)
     Ansible-->>Shell: Return (exit code)
@@ -354,8 +354,8 @@ sequenceDiagram
     - name: Get all CloudflareZeroTrustTenant resources
       include_role: k8s_watch (list_tenants.yml)
     
-    - name: Get all IngressRoute resources
-      include_role: k8s_watch (list_ingressroutes.yml)
+    - name: Get all HTTPRoute resources
+      include_role: k8s_watch (list_httproutes.yml)
     
     - name: Reconcile each tenant
       include_role: tenant_reconcile
@@ -386,9 +386,9 @@ flowchart TD
     K8S_TENANTS --> ROLE_K8S_T[Role: k8s_watch/list_tenants.yml]
     ROLE_K8S_T --> SET_TENANTS[Set Fact: cfzt_tenants]
     
-    SET_TENANTS --> K8S_IR[Task: Get IngressRoute resources]
-    K8S_IR --> ROLE_K8S_IR[Role: k8s_watch/list_ingressroutes.yml]
-    ROLE_K8S_IR --> SET_IR[Set Fact: cfzt_ingressroutes]
+    SET_TENANTS --> K8S_IR[Task: Get HTTPRoute resources]
+    K8S_IR --> ROLE_K8S_IR[Role: k8s_watch/list_httproutes.yml]
+    ROLE_K8S_IR --> SET_IR[Set Fact: cfzt_httproutes]
     
     SET_IR --> TENANT_LOOP{For Each Tenant}
     
@@ -461,7 +461,7 @@ flowchart TD
 
 ### Role 2: k8s_watch
 
-**Purpose**: Discover Kubernetes resources (Tenants and IngressRoutes)
+**Purpose**: Discover Kubernetes resources (Tenants and HTTPRoutes)
 
 **Location**: `ansible/roles/k8s_watch/tasks/`
 
@@ -503,25 +503,25 @@ cfzt_tenants:
         name: cloudflare-api-token
 ```
 
-#### Task File: list_ingressroutes.yml
+#### Task File: list_httproutes.yml
 
 ```mermaid
 flowchart TD
-    START([list_ingressroutes.yml]) --> CHECK{namespaces empty?}
+    START([list_httproutes.yml]) --> CHECK{namespaces empty?}
     
     CHECK -->|Yes, watch all| ALL[kubernetes.core.k8s_info<br/>No namespace filter]
     CHECK -->|No, specific namespaces| LOOP[Loop through namespaces]
     
-    ALL --> SET_ALL[Set: all_ingressroutes]
+    ALL --> SET_ALL[Set: all_httproutes]
     
     LOOP --> EACH[kubernetes.core.k8s_info<br/>namespace: item]
     EACH --> COMBINE[Combine: all results]
-    COMBINE --> SET_SPECIFIC[Set: all_ingressroutes]
+    COMBINE --> SET_SPECIFIC[Set: all_httproutes]
     
     SET_ALL --> FILTER[Filter: cfzt.cloudflare.com/enabled=true]
     SET_SPECIFIC --> FILTER
     
-    FILTER --> SET_FILTERED[Set: cfzt_ingressroutes]
+    FILTER --> SET_FILTERED[Set: cfzt_httproutes]
     SET_FILTERED --> COUNT[Debug: Display counts]
     
     COUNT --> END([Done])
@@ -531,12 +531,12 @@ flowchart TD
 ```
 
 **Output**:
-- Variable `all_ingressroutes`: All IngressRoute resources (in watched namespaces)
-- Variable `cfzt_ingressroutes`: Filtered IngressRoutes with `cfzt.cloudflare.com/enabled: "true"`
+- Variable `all_httproutes`: All HTTPRoute resources (in watched namespaces)
+- Variable `cfzt_httproutes`: Filtered HTTPRoutes with `cfzt.cloudflare.com/enabled: "true"`
 
 **Filtering Logic**:
 ```jinja2
-{{ all_ingressroutes 
+{{ all_httproutes 
    | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined') 
    | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true') 
    | list }}
@@ -546,7 +546,7 @@ flowchart TD
 
 ### Role 3: state_manager
 
-**Purpose**: Manage state tracking ConfigMaps for IngressRoutes
+**Purpose**: Manage state tracking ConfigMaps for HTTPRoutes
 
 **Location**: `ansible/roles/state_manager/tasks/`
 
@@ -554,11 +554,11 @@ The state_manager role has three task files:
 
 #### Task File: check_state.yml
 
-**Purpose**: Determine if IngressRoute needs reconciliation
+**Purpose**: Determine if HTTPRoute needs reconciliation
 
 ```mermaid
 flowchart TD
-    START([check_state.yml]) --> EXTRACT[Extract IngressRoute metadata]
+    START([check_state.yml]) --> EXTRACT[Extract HTTPRoute metadata]
     EXTRACT --> GEN_NAME["Generate ConfigMap name:<br/>cfzt-namespace-name"]
     
     GEN_NAME --> PARSE_ANNO["Extract cfzt.cloudflare.com/* annotations"]
@@ -598,7 +598,7 @@ flowchart TD
 flowchart TD
     START([update_state.yml]) --> TIMESTAMP[Get current timestamp]
     
-    TIMESTAMP --> BUILD["Build ConfigMap definition<br/>with annotation_hash, cloudflare_ids,<br/>last_sync_time, and IngressRoute metadata"]
+    TIMESTAMP --> BUILD["Build ConfigMap definition<br/>with annotation_hash, cloudflare_ids,<br/>last_sync_time, and HTTPRoute metadata"]
     
     BUILD --> CREATE["kubernetes.core.k8s<br/>Create or update ConfigMap"]
     
@@ -616,13 +616,13 @@ flowchart TD
 
 #### Task File: cleanup_orphaned.yml
 
-**Purpose**: Remove ConfigMaps for deleted IngressRoutes
+**Purpose**: Remove ConfigMaps for deleted HTTPRoutes
 
 ```mermaid
 flowchart TD
     START([cleanup_orphaned.yml]) --> LIST_CM[List all state ConfigMaps<br/>with operator labels]
     
-    LIST_CM --> BUILD_EXPECTED[Build list of expected ConfigMap names<br/>from cfzt_ingressroutes]
+    LIST_CM --> BUILD_EXPECTED[Build list of expected ConfigMap names<br/>from cfzt_httproutes]
     
     BUILD_EXPECTED --> COMPARE[Identify orphaned ConfigMaps]
     
@@ -663,7 +663,7 @@ flowchart TD
     CHECK_SECRET -->|No| FAIL[Fail: Credential secret not found]
     CHECK_SECRET -->|Yes| DECODE[Base64 decode API token]
     
-    DECODE --> FILTER_IR[Filter IngressRoutes for this tenant]
+    DECODE --> FILTER_IR[Filter HTTPRoutes for this tenant]
     
     FILTER_IR --> FILTER_NS[Filter by namespace]
     FILTER_NS --> FILTER_ANNO{Has tenant annotation?}
@@ -673,9 +673,9 @@ flowchart TD
     
     FILTER_MATCH --> INIT_COUNT[Initialize counters:<br/>count_hostname_routes = 0<br/>count_access_apps = 0<br/>count_access_policies = 0<br/>count_service_tokens = 0]
     
-    INIT_COUNT --> IR_LOOP{For Each<br/>IngressRoute}
+    INIT_COUNT --> IR_LOOP{For Each<br/>HTTPRoute}
     
-    IR_LOOP -->|Next| RECON_IR[Include Tasks:<br/>reconcile_ingressroute.yml]
+    IR_LOOP -->|Next| RECON_IR[Include Tasks:<br/>reconcile_httproute.yml]
     IR_LOOP -->|Done| UPDATE_STATUS[Include Tasks:<br/>update_tenant_status.yml]
     
     RECON_IR --> IR_LOOP
@@ -691,31 +691,31 @@ flowchart TD
 
 1. **Extract tenant configuration** from the CloudflareZeroTrustTenant CR
 2. **Retrieve API token** from referenced Secret
-3. **Filter IngressRoutes** belonging to this tenant:
+3. **Filter HTTPRoutes** belonging to this tenant:
    - Same namespace as tenant
-   - If IngressRoute has `cfzt.cloudflare.com/tenant` annotation, must match tenant name
+   - If HTTPRoute has `cfzt.cloudflare.com/tenant` annotation, must match tenant name
    - If no tenant annotation and only one tenant in namespace, use that tenant
 4. **Initialize resource counters** for status tracking
-5. **Reconcile each IngressRoute** by calling `reconcile_ingressroute.yml`
+5. **Reconcile each HTTPRoute** by calling `reconcile_httproute.yml`
 6. **Update tenant status** with summary counts
 
 ---
 
-### Task File: reconcile_ingressroute.yml
+### Task File: reconcile_httproute.yml
 
-**Purpose**: Reconcile a single IngressRoute against Cloudflare
+**Purpose**: Reconcile a single HTTPRoute against Cloudflare
 
-**Location**: `ansible/roles/tenant_reconcile/tasks/reconcile_ingressroute.yml`
+**Location**: `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
 
 ```mermaid
 flowchart TD
-    START([reconcile_ingressroute.yml<br/>loop_var: ingressroute]) --> STATE_CHECK[Step 0: Check state]
+    START([reconcile_httproute.yml<br/>loop_var: httproute]) --> STATE_CHECK[Step 0: Check state]
     
     STATE_CHECK --> CALL_STATE[Include Role: state_manager<br/>tasks_from: check_state.yml]
     CALL_STATE --> NEEDS{needs_reconciliation?}
     
     NEEDS -->|No, unchanged| SKIP[Skip: Log no changes detected]
-    NEEDS -->|Yes, changed/new| EXTRACT[Extract IngressRoute metadata]
+    NEEDS -->|Yes, changed/new| EXTRACT[Extract HTTPRoute metadata]
     
     SKIP --> END([Done])
     
@@ -748,7 +748,7 @@ flowchart TD
     CALL_CF3 --> STORE3[Store: access_policy_id in IDs dict]
     STORE3 --> INC3[Increment: count_access_policies]
     
-    INC3 --> PATCH_ACCESS[kubernetes.core.k8s<br/>Patch IngressRoute with:<br/>- accessAppId<br/>- accessPolicyIds]
+    INC3 --> PATCH_ACCESS[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- accessAppId<br/>- accessPolicyIds]
     
     PATCH_ACCESS --> CHECK_TOKEN{serviceToken=true?}
     
@@ -763,9 +763,9 @@ flowchart TD
     CREATE_SECRET -->|Yes| K8S_SECRET[kubernetes.core.k8s<br/>Create Secret with token credentials]
     CREATE_SECRET -->|No| PATCH_TOKEN
     
-    K8S_SECRET --> PATCH_TOKEN[kubernetes.core.k8s<br/>Patch IngressRoute with:<br/>- serviceTokenId<br/>- serviceTokenSecretName]
+    K8S_SECRET --> PATCH_TOKEN[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- serviceTokenId<br/>- serviceTokenSecretName]
     
-    PATCH_TOKEN --> FINAL_PATCH[kubernetes.core.k8s<br/>Patch IngressRoute with:<br/>- hostnameRouteId<br/>- lastReconcile timestamp]
+    PATCH_TOKEN --> FINAL_PATCH[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- hostnameRouteId<br/>- lastReconcile timestamp]
     
     FINAL_PATCH --> UPDATE_STATE[Step 5: Update state]
     UPDATE_STATE --> CALL_UPDATE[Include Role: state_manager<br/>tasks_from: update_state.yml]
@@ -787,7 +787,7 @@ flowchart TD
 
 #### Step 0: State Check (NEW)
 - Calculate hash of all `cfzt.cloudflare.com/*` annotations
-- Query state ConfigMap for this IngressRoute
+- Query state ConfigMap for this HTTPRoute
 - Compare hashes to determine if reconciliation needed
 - **Skip entire reconciliation if no changes detected**
 
@@ -802,21 +802,21 @@ flowchart TD
 - Uses hostname as application domain
 - Sets session duration
 - Stores access_app_id in cloudflare_ids dictionary
-- Patches IngressRoute with app ID annotation
+- Patches HTTPRoute with app ID annotation
 
 #### Step 3: Access Policy
 - Parses allow rules (groups and emails)
 - Creates/updates policy attached to Access Application
 - Supports multiple groups and emails
 - Stores access_policy_id in cloudflare_ids dictionary
-- Patches IngressRoute with policy ID annotation
+- Patches HTTPRoute with policy ID annotation
 
 #### Step 4: Service Token (if enabled)
 - Creates Cloudflare service token for machine-to-machine auth
 - Creates Kubernetes Secret with `client_id` and `client_secret`
-- Secret named: `{ingressroute-name}-cfzt-service-token`
+- Secret named: `{httproute-name}-cfzt-service-token`
 - Stores service_token_id in cloudflare_ids dictionary
-- Patches IngressRoute with token ID and secret name annotations
+- Patches HTTPRoute with token ID and secret name annotations
 
 #### Step 5: Update State (NEW)
 - Updates state ConfigMap with:
@@ -841,7 +841,7 @@ flowchart TD
     
     READY --> BUILD_SUM[Build status summary]
     
-    BUILD_SUM --> SUM[Summary:<br/>- managedIngressRoutes<br/>- hostnameRoutes<br/>- accessApplications<br/>- accessPolicies<br/>- serviceTokens]
+    BUILD_SUM --> SUM[Summary:<br/>- managedHTTPRoutes<br/>- hostnameRoutes<br/>- accessApplications<br/>- accessPolicies<br/>- serviceTokens]
     
     SUM --> UPDATE[kubernetes.core.k8s_status<br/>Update CloudflareZeroTrustTenant]
     
@@ -866,9 +866,9 @@ status:
       status: "True"
       lastTransitionTime: "2026-02-18T10:00:00Z"
       reason: ReconcileSuccess
-      message: "Successfully reconciled 3 IngressRoute(s)"
+      message: "Successfully reconciled 3 HTTPRoute(s)"
   summary:
-    managedIngressRoutes: 3
+    managedHTTPRoutes: 3
     hostnameRoutes: 3
     accessApplications: 2
     accessPolicies: 2
@@ -1106,18 +1106,18 @@ flowchart TD
 3. Service Token
 4. Hostname from tunnel configuration
 
-**Used when**: IngressRoute is deleted or `cfzt.cloudflare.com/enabled` annotation is removed
+**Used when**: HTTPRoute is deleted or `cfzt.cloudflare.com/enabled` annotation is removed
 
 ---
 
 ## Task-Level Flow
 
-### Complete Single IngressRoute Reconciliation
+### Complete Single HTTPRoute Reconciliation
 
 ```mermaid
 sequenceDiagram
     participant Main as tenant_reconcile/main.yml
-    participant IR as reconcile_ingressroute.yml
+    participant IR as reconcile_httproute.yml
     participant CF_HR as cloudflare_api/manage_hostname_route.yml
     participant CF_APP as cloudflare_api/manage_access_app.yml
     participant CF_POL as cloudflare_api/manage_access_policy.yml
@@ -1125,7 +1125,7 @@ sequenceDiagram
     participant K8s as Kubernetes API
     participant Cloudflare as Cloudflare API
     
-    Main->>IR: Include tasks (loop_var: ingressroute)
+    Main->>IR: Include tasks (loop_var: httproute)
     
     IR->>IR: Extract & parse annotations
     IR->>IR: Validate hostname
@@ -1153,7 +1153,7 @@ sequenceDiagram
         Cloudflare-->>CF_POL: Policy created/updated
         CF_POL-->>IR: access_policy_result (policy_id)
         
-        IR->>K8s: Patch IngressRoute (accessAppId, accessPolicyIds)
+        IR->>K8s: Patch HTTPRoute (accessAppId, accessPolicyIds)
         K8s-->>IR: Patched
     end
     
@@ -1166,11 +1166,11 @@ sequenceDiagram
         IR->>K8s: Create Secret (client_id, client_secret)
         K8s-->>IR: Secret created
         
-        IR->>K8s: Patch IngressRoute (serviceTokenId, serviceTokenSecretName)
+        IR->>K8s: Patch HTTPRoute (serviceTokenId, serviceTokenSecretName)
         K8s-->>IR: Patched
     end
     
-    IR->>K8s: Patch IngressRoute (hostnameRouteId, lastReconcile)
+    IR->>K8s: Patch HTTPRoute (hostnameRouteId, lastReconcile)
     K8s-->>IR: Patched
     
     IR-->>Main: Done (counters incremented)
@@ -1208,7 +1208,7 @@ flowchart TD
     RESCUE -->|No| STOP[Stop execution]
     STOP --> EXIT_CODE[Return exit code != 0]
     
-    CONTINUE_EXEC --> NEXT[Next tenant/IngressRoute]
+    CONTINUE_EXEC --> NEXT[Next tenant/HTTPRoute]
     
     EXIT_CODE --> LOOP_CATCH[reconciliation_loop catches]
     LOOP_CATCH --> LOG_FAIL[Log: Reconciliation failed]
@@ -1268,10 +1268,10 @@ sequenceDiagram
 
 ### Example 1: Simple Hostname Route
 
-**IngressRoute**:
+**HTTPRoute**:
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: simple-app
   annotations:
@@ -1292,7 +1292,7 @@ spec:
    └─> GET tunnel config
    └─> Add hostname rule: simple.example.com → http://traefik.traefik.svc:80
    └─> PUT tunnel config
-3. Patch IngressRoute:
+3. Patch HTTPRoute:
    └─> cfzt.cloudflare.com/hostnameRouteId: "tunnel-uuid"
    └─> cfzt.cloudflare.com/lastReconcile: "2026-02-18T10:00:00Z"
 ```
@@ -1303,10 +1303,10 @@ spec:
 
 ### Example 2: Access App with Email Allow
 
-**IngressRoute**:
+**HTTPRoute**:
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: admin-panel
   annotations:
@@ -1350,7 +1350,7 @@ spec:
    └─> POST Access Policy
    └─> Returns: policy_id
 
-5. Patch IngressRoute:
+5. Patch HTTPRoute:
    └─> cfzt.cloudflare.com/hostnameRouteId: "tunnel-uuid"
    └─> cfzt.cloudflare.com/accessAppId: "app-uuid"
    └─> cfzt.cloudflare.com/accessPolicyIds: "policy-uuid"
@@ -1366,10 +1366,10 @@ spec:
 
 ### Example 3: Full Stack with Service Token
 
-**IngressRoute**:
+**HTTPRoute**:
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: api-service
   annotations:
@@ -1417,7 +1417,7 @@ spec:
        ├─> client_id: "xxxx"
        └─> client_secret: "yyyy"
 
-7. Patch IngressRoute:
+7. Patch HTTPRoute:
    └─> cfzt.cloudflare.com/hostnameRouteId: "tunnel-uuid"
    └─> cfzt.cloudflare.com/accessAppId: "app-uuid"
    └─> cfzt.cloudflare.com/accessPolicyIds: "policy-uuid"
@@ -1436,7 +1436,7 @@ spec:
 
 ### Example 4: Update Flow (Idempotency)
 
-**Scenario**: IngressRoute already reconciled, now updating `allowEmails`
+**Scenario**: HTTPRoute already reconciled, now updating `allowEmails`
 
 **Before**:
 ```yaml
@@ -1477,7 +1477,7 @@ annotations:
    └─> PUT https://.../policies/existing-policy-id
    └─> Updates policy with new email list
 
-4. Patch IngressRoute:
+4. Patch HTTPRoute:
    └─> (IDs remain the same)
    └─> cfzt.cloudflare.com/lastReconcile: "2026-02-18T10:05:30Z"  # Updated timestamp
 ```
@@ -1490,8 +1490,8 @@ annotations:
 
 The reconciliation flow follows a clear pattern:
 
-1. **Discovery**: List tenants and IngressRoutes
-2. **Iteration**: For each tenant, for each IngressRoute
+1. **Discovery**: List tenants and HTTPRoutes
+2. **Iteration**: For each tenant, for each HTTPRoute
 3. **State Check**: Calculate annotation hash and compare with stored ConfigMap
 4. **Conditional Reconciliation**: Only contact Cloudflare API if changes detected
 5. **State Update**: Store annotation hash and Cloudflare IDs in ConfigMap

@@ -21,7 +21,7 @@ spec:
             spec:
               type: object
               properties:
-                # Optional tenant reference - can be overridden per IngressRoute
+                # Optional tenant reference - can be overridden per HTTPRoute
                 tenantRef:
                   type: string
                   description: "Name of CloudflareZeroTrustTenant to use (optional)"
@@ -175,11 +175,11 @@ spec:
                         type: string
                       message:
                         type: string
-                usedByIngressRoutes:
+                usedByHTTPRoutes:
                   type: array
                   items:
                     type: string
-                  description: "List of IngressRoutes using this template"
+                  description: "List of HTTPRoutes using this template"
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -194,7 +194,7 @@ spec:
           jsonPath: .spec.serviceToken.enabled
         - name: Used By
           type: integer
-          jsonPath: .status.usedByIngressRoutes
+          jsonPath: .status.usedByHTTPRoutes
           priority: 1
         - name: Age
           type: date

@@ -1,7 +1,7 @@
 ---
-# Reconcile a single IngressRoute
+# Reconcile a single HTTPRoute
 # Variables:
-#   - ingressroute: The IngressRoute resource
+#   - httproute: The HTTPRoute resource
 #   - api_token: Cloudflare API token
 #   - tenant_account_id: Account ID
 #   - tenant_tunnel_id: Default tunnel ID
@@ -9,28 +9,28 @@
 #   - operator_namespace: Operator namespace (default: cloudflare-zero-trust)
 
 # Step 0: Check if reconciliation needed based on state
-- name: Check IngressRoute state
+- name: Check HTTPRoute state
   include_role:
     name: state_manager
     tasks_from: check_state.yml
   vars:
-    ingressroute: "{{ ingressroute }}"
+    httproute: "{{ httproute }}"
     operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
 
 - name: Skip reconciliation if no changes detected
   ansible.builtin.debug:
-    msg: "Skipping {{ ingressroute.metadata.namespace }}/{{ ingressroute.metadata.name }} - no changes detected"
+    msg: "Skipping {{ httproute.metadata.namespace }}/{{ httproute.metadata.name }} - no changes detected"
   when: not needs_reconciliation
 
-- name: Reconcile IngressRoute (changed or new)
+- name: Reconcile HTTPRoute (changed or new)
   when: needs_reconciliation
   block:
-    - name: Extract IngressRoute metadata
+    - name: Extract HTTPRoute metadata
       ansible.builtin.set_fact:
-        ir_name: "{{ ingressroute.metadata.name }}"
-        ir_namespace: "{{ ingressroute.metadata.namespace }}"
-        ir_uid: "{{ ingressroute.metadata.uid }}"
-        ir_annotations: "{{ ingressroute.metadata.annotations }}"
+        ir_name: "{{ httproute.metadata.name }}"
+        ir_namespace: "{{ httproute.metadata.namespace }}"
+        ir_uid: "{{ httproute.metadata.uid }}"
+        ir_annotations: "{{ httproute.metadata.annotations }}"
 
     # Step 1: Load template
     - name: Get template name from annotation or use default
@@ -134,7 +134,7 @@
       when: template_spec.serviceToken is not defined
 
     # Step 3: Parse core annotations (hostname, tunnel ID, etc.)
-    - name: Parse core IngressRoute annotations
+    - name: Parse core HTTPRoute annotations
       ansible.builtin.set_fact:
         hostname: "{{ ir_annotations['cfzt.cloudflare.com/hostname'] | default('') }}"
         tunnel_id: "{{ ir_annotations['cfzt.cloudflare.com/tunnelId'] | default(tenant_tunnel_id) }}"
@@ -153,12 +153,12 @@
 
     - name: Validate hostname
       ansible.builtin.fail:
-        msg: "IngressRoute {{ ir_namespace }}/{{ ir_name }} missing required annotation: cfzt.cloudflare.com/hostname"
+        msg: "HTTPRoute {{ ir_namespace }}/{{ ir_name }} missing required annotation: cfzt.cloudflare.com/hostname"
       when: hostname == ""
 
     - name: Display reconciliation details
       ansible.builtin.debug:
-        msg: "Reconciling IngressRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
+        msg: "Reconciling HTTPRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
 
     # Step 1: Create/Update Hostname Route
     - name: Manage hostname route
@@ -285,12 +285,12 @@
 
           when: not use_existing_policies
 
-        # Update IngressRoute with Access App and Policy IDs
-        - name: Patch IngressRoute with Access IDs (existing policies)
+        # Update HTTPRoute with Access App and Policy IDs
+        - name: Patch HTTPRoute with Access IDs (existing policies)
           kubernetes.core.k8s:
             state: patched
-            kind: IngressRoute
-            api_version: traefik.io/v1alpha1
+            kind: HTTPRoute
+            api_version: gateway.networking.k8s.io/v1
             name: "{{ ir_name }}"
             namespace: "{{ ir_namespace }}"
             definition:
@@ -300,11 +300,11 @@
                   cfzt.cloudflare.com/accessPolicyIds: "{{ existing_policy_ids }}"
           when: use_existing_policies
 
-        - name: Patch IngressRoute with Access IDs (created policy)
+        - name: Patch HTTPRoute with Access IDs (created policy)
           kubernetes.core.k8s:
             state: patched
-            kind: IngressRoute
-            api_version: traefik.io/v1alpha1
+            kind: HTTPRoute
+            api_version: gateway.networking.k8s.io/v1
             name: "{{ ir_name }}"
             namespace: "{{ ir_namespace }}"
             definition:
@@ -354,12 +354,12 @@
                 client_secret: "{{ service_token_result.client_secret }}"
           when: service_token_result.created
 
-        # Update IngressRoute with Service Token ID and Secret name
-        - name: Patch IngressRoute with Service Token info
+        # Update HTTPRoute with Service Token ID and Secret name
+        - name: Patch HTTPRoute with Service Token info
           kubernetes.core.k8s:
             state: patched
-            kind: IngressRoute
-            api_version: traefik.io/v1alpha1
+            kind: HTTPRoute
+            api_version: gateway.networking.k8s.io/v1
             name: "{{ ir_name }}"
             namespace: "{{ ir_namespace }}"
             definition:
@@ -370,12 +370,12 @@
 
       when: create_service_token
 
-    # Final: Update IngressRoute with hostname route info
-    - name: Patch IngressRoute with hostname route info
+    # Final: Update HTTPRoute with hostname route info
+    - name: Patch HTTPRoute with hostname route info
       kubernetes.core.k8s:
         state: patched
-        kind: IngressRoute
-        api_version: traefik.io/v1alpha1
+        kind: HTTPRoute
+        api_version: gateway.networking.k8s.io/v1
         name: "{{ ir_name }}"
         namespace: "{{ ir_namespace }}"
         definition:
@@ -385,7 +385,7 @@
               cfzt.cloudflare.com/lastReconcile: "{{ ansible_date_time.iso8601 }}"
 
     # Update state ConfigMap with reconciliation results
-    - name: Update IngressRoute state
+    - name: Update HTTPRoute state
       include_role:
         name: state_manager
         tasks_from: update_state.yml

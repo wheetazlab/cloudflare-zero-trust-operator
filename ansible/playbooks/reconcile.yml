@@ -45,10 +45,10 @@
         name: k8s_watch
         tasks_from: list_tenants.yml
 
-    - name: Get all IngressRoute resources
+    - name: Get all HTTPRoute resources
       include_role:
         name: k8s_watch
-        tasks_from: list_ingressroutes.yml
+        tasks_from: list_httproutes.yml
       vars:
         namespaces: "{{ watch_namespaces.split(',') if watch_namespaces else [] }}"
 
@@ -66,5 +66,5 @@
         name: state_manager
         tasks_from: cleanup_orphaned.yml
       vars:
-        cfzt_ingressroutes: "{{ cfzt_ingressroutes | default([]) }}"
+        cfzt_httproutes: "{{ cfzt_httproutes | default([]) }}"
         operator_namespace: "{{ operator_namespace }}"

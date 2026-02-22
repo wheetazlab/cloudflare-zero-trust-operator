@@ -5,7 +5,7 @@ A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from
 
 ## Features
 
-- 🚀 **Annotation-driven configuration** - Manage Cloudflare Zero Trust from Traefik IngressRoute annotations
+- 🚀 **Annotation-driven configuration** - Manage Cloudflare Zero Trust from Traefik HTTPRoute annotations
 - 🔒 **Access Control** - Automatically create and manage Cloudflare Access Applications and Policies
 - 🔑 **Service Tokens** - Generate service tokens for machine-to-machine authentication
 - 🌐 **Tunnel Management** - Configure Cloudflare Tunnel hostname routes
@@ -47,11 +47,11 @@ spec:
     key: token
 ```
 
-4. **Annotate your IngressRoutes:**
+4. **Annotate your HTTPRoutes:**
 
 ```yaml
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: myapp
   annotations:
@@ -60,7 +60,7 @@ metadata:
     cfzt.cloudflare.com/accessApp: "true"
     cfzt.cloudflare.com/allowEmails: "user@example.com"
 spec:
-  # ... your IngressRoute spec
+  # ... your HTTPRoute spec
 ```
 
 ## Documentation
@@ -70,18 +70,18 @@ spec:
 
 ## What It Does
 
-The operator watches your Traefik IngressRoute resources for specific annotations and automatically:
+The operator watches your Traefik HTTPRoute resources for specific annotations and automatically:
 
 1. **Creates Cloudflare Tunnel hostname routes** - Routes public hostnames through your Cloudflare Tunnel to origin services
 2. **Creates Access Applications** - Protects your applications with Cloudflare Access
 3. **Creates Access Policies** - Configures who can access your applications (email, groups, etc.)
 4. **Generates Service Tokens** - Creates tokens for machine-to-machine authentication
-5. **Tracks state** - Stores Cloudflare resource IDs in IngressRoute annotations for updates/deletions
+5. **Tracks state** - Stores Cloudflare resource IDs in HTTPRoute annotations for updates/deletions
 
 ## Requirements
 
 - Kubernetes 1.23+
-- Traefik ingress controller with IngressRoute CRD
+- Gateway API-compatible ingress controller with HTTPRoute CRD
 - Cloudflare account with Zero Trust enabled
 - Cloudflare API token with:
   - Account.Cloudflare Tunnel:Edit
@@ -91,7 +91,7 @@ The operator watches your Traefik IngressRoute resources for specific annotation
 
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│  IngressRoute   │─────▶│  CFZT Operator   │─────▶│   Cloudflare    │
+│  HTTPRoute   │─────▶│  CFZT Operator   │─────▶│   Cloudflare    │
 │  (annotations)  │      │   (Ansible)      │      │   Zero Trust    │
 └─────────────────┘      └──────────────────┘      └─────────────────┘
         │                         │

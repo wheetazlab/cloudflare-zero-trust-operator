@@ -35,18 +35,18 @@
   ansible.builtin.set_fact:
     api_token: "{{ credential_secret.resources[0].data[tenant_credential_ref.key | default('token')] | b64decode }}"
 
-- name: Filter IngressRoutes for this tenant
+- name: Filter HTTPRoutes for this tenant
   ansible.builtin.set_fact:
-    tenant_ingressroutes: "{{ cfzt_ingressroutes | selectattr('metadata.namespace', 'equalto', tenant_namespace) | list }}"
+    tenant_httproutes: "{{ cfzt_httproutes | selectattr('metadata.namespace', 'equalto', tenant_namespace) | list }}"
 
 - name: Further filter by tenant annotation
   ansible.builtin.set_fact:
-    tenant_ingressroutes: "{{ tenant_ingressroutes | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined') | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'equalto', tenant_name) | list }}"
-  when: tenant_ingressroutes | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined') | list | length > 0
+    tenant_httproutes: "{{ tenant_httproutes | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined') | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'equalto', tenant_name) | list }}"
+  when: tenant_httproutes | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined') | list | length > 0
 
-- name: Display IngressRoute count for tenant
+- name: Display HTTPRoute count for tenant
   ansible.builtin.debug:
-    msg: "Found {{ tenant_ingressroutes | length }} IngressRoute(s) for tenant {{ tenant_name }}"
+    msg: "Found {{ tenant_httproutes | length }} HTTPRoute(s) for tenant {{ tenant_name }}"
 
 - name: Initialize counters
   ansible.builtin.set_fact:
@@ -55,12 +55,12 @@
     count_access_policies: 0
     count_service_tokens: 0
 
-- name: Reconcile each IngressRoute
-  include_tasks: reconcile_ingressroute.yml
-  loop: "{{ tenant_ingressroutes }}"
+- name: Reconcile each HTTPRoute
+  include_tasks: reconcile_httproute.yml
+  loop: "{{ tenant_httproutes }}"
   loop_control:
-    loop_var: ingressroute
-    label: "{{ ingressroute.metadata.namespace }}/{{ ingressroute.metadata.name }}"
+    loop_var: httproute
+    label: "{{ httproute.metadata.namespace }}/{{ httproute.metadata.name }}"
 
 - name: Update tenant status
   include_tasks: update_tenant_status.yml

@@ -155,11 +155,6 @@ tenant:
       matchSNIToHost: false
 ```
 
-> **Important:** If you use Option A (`apiToken`), Helm will create a Secret named `<tenant.name>-api-token`
-> in the tenant namespace containing your token in plaintext in the cluster etcd.
-> For production, prefer Option B with a pre-created Secret managed outside of Helm (e.g. via Infisical,
-> Vault, or Sealed Secrets).
-
 Install with the values file:
 
 ```bash

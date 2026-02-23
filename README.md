@@ -5,107 +5,122 @@ A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from
 
 ## Features
 
-- 🚀 **Annotation-driven configuration** - Manage Cloudflare Zero Trust from Traefik HTTPRoute annotations
-- 🔒 **Access Control** - Automatically create and manage Cloudflare Access Applications and Policies
-- 🔑 **Service Tokens** - Generate service tokens for machine-to-machine authentication
-- 🌐 **Tunnel Management** - Configure Cloudflare Tunnel hostname routes
-- 🔄 **Idempotent** - Safe to run repeatedly, handles updates and deletions
-- 🎯 **Multi-tenant** - Support multiple Cloudflare accounts in one cluster
-- 📝 **GitOps-friendly** - Managed entirely through Kubernetes CRs and annotations
+- 🚀 **Annotation-driven configuration** — Manage Cloudflare Zero Trust from Kubernetes `HTTPRoute` annotations
+- 🔒 **Access Control** — Automatically create and manage Cloudflare Access Applications and Policies
+- 🔑 **Service Tokens** — Generate service tokens for machine-to-machine authentication
+- 🌐 **Tunnel Management** — Configure Cloudflare Tunnel hostname routes
+- 🔗 **Automatic DNS** — Creates the tunnel CNAME (`hostname → <tunnel-id>.cfargotunnel.com`) automatically when `zoneId` is set on the tenant
+- 📡 **DNS-only mode** — Publish internal services via a Cloudflare A record pointing at your cluster VIP, with no tunnel required
+- 🔄 **Idempotent** — Safe to run repeatedly; handles creates, updates, and deletions
+- 🎯 **Multi-tenant** — Support multiple Cloudflare accounts in one cluster
+- 📝 **GitOps-friendly** — Managed entirely through Kubernetes CRs and HTTPRoute annotations
 
 ## Quick Start
 
-1. **Install the operator:**
+### 1. Add the Helm repository
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/wheetazlab/cloudflare-zero-trust-operator/main/config/crd/cfzt.cloudflare.com_cloudflarezerotrusttenants.yaml
-kubectl apply -f https://raw.githubusercontent.com/wheetazlab/cloudflare-zero-trust-operator/main/config/rbac/rbac.yaml
-kubectl apply -f https://raw.githubusercontent.com/wheetazlab/cloudflare-zero-trust-operator/main/config/deployment/operator.yaml
+helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator
+helm repo update
 ```
 
-2. **Create a Cloudflare API token secret:**
+### 2. Install with a values file
 
-```bash
-kubectl create secret generic cloudflare-api-token \
-  --from-literal=token=YOUR_API_TOKEN \
-  -n cloudflare-zero-trust
-```
-
-3. **Create a CloudflareZeroTrustTenant:**
+Create `my-values.yaml`:
 
 ```yaml
-apiVersion: cfzt.cloudflare.com/v1alpha1
-kind: CloudflareZeroTrustTenant
-metadata:
-  name: prod-tenant
-  namespace: default
-spec:
-  accountId: "your-account-id"
-  tunnelId: "your-tunnel-id"
-  credentialRef:
-    name: cloudflare-api-token
-    key: token
+tenant:
+  create: true
+  name: "prod-tenant"
+  accountId: "abcdef1234567890abcdef1234567890"    # Cloudflare Account ID
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # Cloudflare Tunnel ID
+  zoneId:    "fedcba0987654321fedcba0987654321"    # Zone ID (enables automatic DNS)
+  apiToken:  "your-cloudflare-api-token"
 ```
 
-4. **Annotate your HTTPRoutes:**
+```bash
+helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \
+  --namespace cloudflare-zero-trust \
+  --create-namespace \
+  -f my-values.yaml
+```
+
+### 3. Annotate your HTTPRoutes
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: myapp
+  namespace: default
   annotations:
     cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/template: "my-template"
     cfzt.cloudflare.com/hostname: "myapp.example.com"
-    cfzt.cloudflare.com/accessApp: "true"
-    cfzt.cloudflare.com/allowEmails: "user@example.com"
 spec:
   # ... your HTTPRoute spec
 ```
 
+The operator reconciles the annotation and:
+- writes the hostname ingress rule to the Cloudflare Tunnel
+- creates the DNS CNAME record (if `zoneId` is set on the tenant)
+- creates the Cloudflare Access Application and policy
+- stores all Cloudflare resource IDs back as annotations on the HTTPRoute
+
 ## Documentation
 
-- [Full Documentation](docs/README.md) - Architecture, API reference, deployment guide
-- [Examples](examples/) - Example configurations for various use cases
+- [Helm chart README](charts/cloudflare-zero-trust-operator/README.md) — full install guide, all values, CRD reference, dns-only mode, upgrade/uninstall
+- [docs/README.md](docs/README.md) — high-level documentation index
+- [docs/architecture.md](docs/architecture.md) — component architecture and design
+- [docs/flow.md](docs/flow.md) — reconciliation flow walkthrough
+- [Examples](examples/) — example template and HTTPRoute configurations
 
 ## What It Does
 
-The operator watches your Traefik HTTPRoute resources for specific annotations and automatically:
+The operator watches `HTTPRoute` resources for annotations and automatically manages:
 
-1. **Creates Cloudflare Tunnel hostname routes** - Routes public hostnames through your Cloudflare Tunnel to origin services
-2. **Creates Access Applications** - Protects your applications with Cloudflare Access
-3. **Creates Access Policies** - Configures who can access your applications (email, groups, etc.)
-4. **Generates Service Tokens** - Creates tokens for machine-to-machine authentication
-5. **Tracks state** - Stores Cloudflare resource IDs in HTTPRoute annotations for updates/deletions
+1. **Cloudflare Tunnel hostname routes** — routes public hostnames through your tunnel to origin services
+2. **Automatic CNAME DNS** — creates `hostname CNAME <tunnel-id>.cfargotunnel.com` (proxied, TTL auto) when `tenant.zoneId` is set; logs a warning and skips if not set
+3. **Cloudflare Access Applications** — protects your applications with Cloudflare Access
+4. **Access Policies** — configures who can access your applications (email, groups, etc.)
+5. **Service Tokens** — creates tokens for machine-to-machine authentication
+6. **DNS-only A records** — for internal services reachable via DNS but not tunnelled (see [DNS-only mode](charts/cloudflare-zero-trust-operator/README.md#dns-only-mode-internal--direct-to-cluster-routing))
+7. **State tracking** — stores all Cloudflare resource IDs in HTTPRoute annotations for idempotent updates and clean deletion
 
 ## Requirements
 
-- Kubernetes 1.23+
-- Gateway API-compatible ingress controller with HTTPRoute CRD
+- Kubernetes 1.25+
+- Gateway API CRDs installed (`HTTPRoute` must exist)
 - Cloudflare account with Zero Trust enabled
-- Cloudflare API token with:
-  - Account.Cloudflare Tunnel:Edit
-  - Account.Access:Edit
+- Cloudflare API token with the following permissions:
+
+| Permission | Level | Access | When required |
+|---|---|---|---|
+| Cloudflare Tunnel | Account | Edit | Always |
+| Access: Apps and Policies | Account | Edit | Always |
+| Access: Service Tokens | Account | Edit | Always |
+| Zone: DNS | Zone | Edit | When `tenant.zoneId` is set (tunnel CNAME + dns-only A records) |
 
 ## Architecture
 
 ```
-┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│  HTTPRoute   │─────▶│  CFZT Operator   │─────▶│   Cloudflare    │
-│  (annotations)  │      │   (Ansible)      │      │   Zero Trust    │
-└─────────────────┘      └──────────────────┘      └─────────────────┘
-        │                         │
-        │                         ▼
-        │                ┌──────────────────┐
-        └───────────────▶│  Tenant CR       │
-                         │  (credentials)   │
-                         └──────────────────┘
+┌─────────────────────┐      ┌──────────────────────┐      ┌─────────────────┐
+│  HTTPRoute          │─────▶│  CFZT Operator       │─────▶│   Cloudflare    │
+│  (annotations)      │      │  (Ansible container) │      │   Zero Trust    │
+└─────────────────────┘      └──────────────────────┘      └─────────────────┘
+        ▲                              │
+        │   write-back IDs             │  reads credentials from
+        └──────────────────────┐       ▼
+                               │  ┌──────────────────────┐
+                               └──│  CloudflareZeroTrust │
+                                  │  Tenant CR + Secret  │
+                                  └──────────────────────┘
 ```
 
 ## Development
 
 ```bash
-# Clone the repository
 git clone https://github.com/wheetazlab/cloudflare-zero-trust-operator.git
 cd cloudflare-zero-trust-operator
 
@@ -113,30 +128,15 @@ cd cloudflare-zero-trust-operator
 pip install -r container/requirements.txt
 ansible-galaxy collection install -r ansible/requirements.yml
 
-# Run locally
-cd ansible
-ansible-playbook playbooks/reconcile.yml
-
 # Build container
 docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
-# Deploy to kind cluster
-kind create cluster --name cfzt-operator
-kubectl apply -f config/crd/
-kubectl apply -f config/rbac/
-kubectl apply -f config/deployment/
+# Deploy via Helm (local chart)
+helm install cloudflare-zero-trust-operator ./charts/cloudflare-zero-trust-operator \
+  --namespace cloudflare-zero-trust \
+  --create-namespace \
+  -f my-values.yaml
 ```
-
-## Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WATCH_NAMESPACES` | `""` (all) | Comma-separated list of namespaces to watch |
-| `POLL_INTERVAL_SECONDS` | `60` | Reconciliation interval in seconds |
-| `LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
-| `CLOUDFLARE_API_BASE` | `https://api.cloudflare.com/client/v4` | Cloudflare API base URL |
 
 ## Contributing
 
@@ -144,10 +144,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- 📖 [Documentation](docs/README.md)
-- 🐛 [Issue Tracker](https://github.com/wheetazlab/cloudflare-zero-trust-operator/issues)
-- 💬 [Discussions](https://github.com/wheetazlab/cloudflare-zero-trust-operator/discussions) 
+MIT License — see [LICENSE](LICENSE) for details. 

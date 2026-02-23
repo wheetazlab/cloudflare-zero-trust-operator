@@ -52,31 +52,32 @@ graph TB
     subgraph "Kubernetes Cluster"
         CRD[CRDs]
         RBAC[RBAC]
-        DEPLOY[Deployment]
-        POD[Operator Pod]
+        MGR_DEP[manager Deployment]
+        KW_DEP[kube_worker Deployment]
+        CW_DEP[cloudflare_worker Deployment]
         
-        CRD --> DEPLOY
-        RBAC --> DEPLOY
-        DEPLOY --> POD
+        CRD --> MGR_DEP
+        RBAC --> MGR_DEP
+        MGR_DEP --> MGR_POD[manager pod<br/>ROLE=manager]
+        KW_DEP --> KW_POD[kube_worker pod<br/>ROLE=kube_worker]
+        CW_DEP --> CW_POD[cloudflare_worker pod<br/>ROLE=cloudflare_worker]
         
-        subgraph "Operator Pod"
-            ENTRY[entrypoint.sh]
-            LOOP[Reconciliation Loop]
-            PB[Ansible Playbooks]
-            
-            ENTRY --> LOOP
-            LOOP --> PB
-        end
+        MGR_POD -.ensures exist.-> KW_DEP
+        MGR_POD -.ensures exist.-> CW_DEP
         
         subgraph "Kubernetes Resources"
             TENANT[CloudflareZeroTrustTenant CR]
             IR[HTTPRoute]
+            TASK[CloudflareTask CR]
             SECRET[Secrets]
+            CFGMAP[State ConfigMaps]
         end
         
-        POD --> TENANT
-        POD --> IR
-        POD --> SECRET
+        KW_POD --> TENANT
+        KW_POD --> IR
+        KW_POD --> TASK
+        KW_POD --> CFGMAP
+        CW_POD --> TASK
     end
     
     subgraph "Cloudflare"
@@ -85,14 +86,14 @@ graph TB
         ACCESS[Access Apps/Policies]
         TOKENS[Service Tokens]
         
-        POD --> API
+        CW_POD --> API
         API --> TUNNEL
         API --> ACCESS
         API --> TOKENS
     end
     
     IMG --> GHCR
-    GHCR --> DEPLOY
+    GHCR --> MGR_DEP
 ```
 
 ## Build Process
@@ -169,21 +170,27 @@ graph TB
     subgraph "Kubernetes Cluster"
         subgraph "cloudflare-zero-trust Namespace"
             SA[ServiceAccount]
-            CM[ConfigMap]
-            DEP[Deployment]
-            POD1[Operator Pod]
+            MGR_DEP[manager Deployment]
+            KW_DEP[kube_worker Deployment]
+            CW_DEP[cloudflare_worker Deployment]
             
-            SA --> DEP
-            CM --> DEP
-            DEP --> POD1
+            SA --> MGR_DEP
+            SA --> KW_DEP
+            SA --> CW_DEP
+            MGR_DEP --> MGR[manager pod]
+            KW_DEP --> KW[kube_worker pod]
+            CW_DEP --> CW[cloudflare_worker pod]
+            
+            MGR -.ensures exist.-> KW_DEP
+            MGR -.ensures exist.-> CW_DEP
         end
         
         subgraph "Cluster-Wide"
-            CRD[CloudflareZeroTrustTenant CRD]
+            CRD1[CloudflareZeroTrustTenant CRD]
+            CRD2[CloudflareTask CRD]
             CR1[ClusterRole]
             CRB1[ClusterRoleBinding]
             
-            CRD -.defines.-> TENANT1
             CR1 --> CRB1
             CRB1 --> SA
         end
@@ -198,21 +205,31 @@ graph TB
             TENANT1 -.references.-> SEC1
         end
         
-        POD1 -.watches.-> TENANT1
-        POD1 -.watches.-> IR1
-        POD1 -.watches.-> IR2
-        POD1 -.watches.-> IR3
-        POD1 -.reads.-> SEC1
-        POD1 -.patches.-> IR1
-        POD1 -.patches.-> IR2
-        POD1 -.patches.-> IR3
-        POD1 -.updates status.-> TENANT1
+        subgraph "Operator Namespace"
+            TASK[CloudflareTask CR]
+            CFGMAP[State ConfigMaps]
+        end
+        
+        KW -.lists.-> TENANT1
+        KW -.lists.-> IR1
+        KW -.lists.-> IR2
+        KW -.lists.-> IR3
+        KW -.reads.-> SEC1
+        KW -.patches.-> IR1
+        KW -.patches.-> IR2
+        KW -.patches.-> IR3
+        KW -.creates/reads.-> TASK
+        KW -.reads/writes.-> CFGMAP
+        CW -.claims/completes.-> TASK
     end
     
-    style CRD fill:#E91E63
+    style CRD1 fill:#E91E63
+    style CRD2 fill:#E91E63
     style CR1 fill:#E91E63
     style CRB1 fill:#E91E63
-    style POD1 fill:#4CAF50
+    style MGR fill:#4CAF50
+    style KW fill:#2196F3
+    style CW fill:#FF9800
 ```
 
 ### Deployment Components
@@ -607,15 +624,15 @@ graph LR
 ```
 ansible/
 ├── playbooks/
-│   └── reconcile.yml          # Main entry point
+│   └── reconcile.yml              # Role dispatcher (reads ROLE env var)
 ├── roles/
-│   ├── reconciliation_loop/   # Continuous loop wrapper
-│   ├── k8s_watch/             # Kubernetes resource discovery
-│   ├── tenant_reconcile/      # Per-tenant orchestration
-│   └── cloudflare_api/        # Cloudflare API interactions
-├── ansible.cfg                # Ansible configuration
-├── inventory                  # Localhost inventory
-└── requirements.yml           # Collection dependencies
+│   ├── operator_config/           # Self-manage operator Deployment; create worker Deployments
+│   ├── kube_worker/               # K8s state manager; creates CloudflareTask CRs
+│   ├── cloudflare_worker/         # Claims CloudflareTask CRs; calls Cloudflare API
+│   └── cloudflare_api/            # Library: individual Cloudflare REST API operations
+├── ansible.cfg                    # Ansible configuration
+├── inventory                      # Localhost inventory
+└── requirements.yml               # Collection dependencies
 ```
 
 ### 2. Kubernetes API Interaction
@@ -653,33 +670,35 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant Operator
+    participant CW as cloudflare_worker
     participant K8s as Kubernetes API
     participant Secret as API Token Secret
     participant CF as Cloudflare API
     
-    Operator->>K8s: Get CloudflareZeroTrustTenant
-    K8s-->>Operator: Tenant with credentialRef
+    CW->>K8s: Claim CloudflareTask CR (phase → InProgress)
+    K8s-->>CW: CloudflareTask spec (hostname, operations, credentialRef)
     
-    Operator->>K8s: Get Secret (credentialRef.name)
-    K8s-->>Operator: Secret with API token
+    CW->>K8s: Get Secret (credentialRef.name)
+    K8s-->>CW: Secret with API token
     
-    Operator->>Operator: Extract & decode token
+    CW->>CW: Extract & decode token
     
-    loop For each Cloudflare operation
-        Operator->>CF: HTTPS + Bearer Token
-        CF-->>Operator: JSON Response
+    loop For each operation in CloudflareTask.spec.operations
+        CW->>CF: HTTPS + Bearer Token
+        CF-->>CW: JSON Response
         
         alt API Error (429 Rate Limit)
-            Operator->>Operator: Exponential backoff
-            Operator->>CF: Retry request
+            CW->>CW: Exponential backoff
+            CW->>CF: Retry request
         else API Error (Other)
-            Operator->>Operator: Log error
-            Operator->>K8s: Update Tenant status (Error condition)
+            CW->>CW: Rescue block catches error
+            CW->>K8s: Patch task phase → Failed (error message)
         else Success
-            Operator->>Operator: Process response
+            CW->>CW: Collect result IDs
         end
     end
+    
+    CW->>K8s: Patch task phase → Completed (result IDs in status)
 ```
 
 **API Interaction Pattern**:
@@ -694,79 +713,89 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    START([Reconciliation Triggered]) --> LIST_TENANTS[List CloudflareZeroTrustTenant CRs]
-    LIST_TENANTS --> LIST_IR[List HTTPRoutes with cfzt.cloudflare.com/enabled=true]
-    
-    LIST_IR --> TENANT_LOOP{For Each Tenant}
-    
-    TENANT_LOOP -->|Next Tenant| GET_CREDS[Get API Token from Secret]
-    TENANT_LOOP -->|Done| UPDATE_STATUS[Update All Tenant Statuses]
-    
-    GET_CREDS --> FILTER_IR[Filter HTTPRoutes for This Tenant]
-    
-    FILTER_IR --> IR_LOOP{For Each HTTPRoute}
-    
-    IR_LOOP -->|Next IR| PARSE_ANNO[Parse Annotations]
-    IR_LOOP -->|Done| TENANT_LOOP
-    
-    PARSE_ANNO --> HOSTNAME[Create/Update Hostname Route]
-    HOSTNAME --> ACCESS_CHECK{accessApp=true?}
-    
-    ACCESS_CHECK -->|Yes| CREATE_APP[Create/Update Access App]
-    CREATE_APP --> CREATE_POLICY[Create/Update Access Policy]
-    CREATE_POLICY --> TOKEN_CHECK{serviceToken=true?}
-    
-    ACCESS_CHECK -->|No| TOKEN_CHECK
-    
-    TOKEN_CHECK -->|Yes| CREATE_TOKEN[Create Service Token]
-    CREATE_TOKEN --> CREATE_SECRET[Create K8s Secret with Token]
-    CREATE_SECRET --> PATCH_IR[Patch HTTPRoute Annotations]
-    
-    TOKEN_CHECK -->|No| PATCH_IR
-    
-    PATCH_IR --> INCREMENT[Increment Counters]
-    INCREMENT --> IR_LOOP
-    
-    UPDATE_STATUS --> SLEEP[Sleep POLL_INTERVAL_SECONDS]
-    SLEEP --> START
-    
-    style START fill:#4CAF50
-    style SLEEP fill:#E91E63
+    subgraph KW["kube_worker loop (every POLL_INTERVAL_SECONDS)"]
+        KW_START([kube_worker wakes]) --> COLLECT[collect_results.yml<br/>Completed/Failed tasks → patch HTTPRoutes → delete tasks]
+        COLLECT --> LIST_T[list_tenants.yml<br/>fetch CloudflareZeroTrustTenant CRs]
+        LIST_T --> LIST_HR[list_httproutes.yml<br/>fetch HTTPRoutes with cfzt/enabled=true]
+        LIST_HR --> TENANT_LOOP{For Each Tenant}
+        TENANT_LOOP -->|next| RECONCILE[reconcile_tenant.yml × each HTTPRoute]
+        RECONCILE --> CHECK[check_state.yml<br/>compare annotation SHA256 to ConfigMap hash]
+        CHECK -->|no change| SKIP[skip — no task created]
+        CHECK -->|changed or new| CREATE_TASK[create_task.yml<br/>build + apply CloudflareTask CR<br/>phase: Pending]
+        SKIP --> TENANT_LOOP
+        CREATE_TASK --> TENANT_LOOP
+        TENANT_LOOP -->|done| CLEANUP[cleanup_orphaned.yml]
+        CLEANUP --> KW_SLEEP[sleep]
+        KW_SLEEP --> KW_START
+    end
+
+    subgraph CW["cloudflare_worker loop (every POLL_INTERVAL_SECONDS)"]
+        CW_START([cloudflare_worker wakes]) --> FIND_TASKS[List Pending CloudflareTask CRs]
+        FIND_TASKS --> CLAIM[Claim task — patch phase → InProgress]
+        CLAIM --> EXEC[execute_task.yml<br/>call Cloudflare API operations]
+        EXEC -->|all ok| COMPLETE[patch phase → Completed<br/>result IDs in status]
+        EXEC -->|any error| FAILED[patch phase → Failed<br/>error message in status]
+        COMPLETE --> CW_SLEEP[sleep]
+        FAILED --> CW_SLEEP
+        CW_SLEEP --> CW_START
+    end
+
+    CREATE_TASK -.CloudflareTask CR.-> FIND_TASKS
+    COMPLETE -.Completed task.-> COLLECT
+
+    style KW_START fill:#2196F3
+    style CW_START fill:#FF9800
+    style CREATE_TASK fill:#4CAF50
+    style COMPLETE fill:#4CAF50
+    style FAILED fill:#E53935
 ```
 
 ### State Management
 
 ```mermaid
 graph TB
-    subgraph "HTTPRoute Annotations (State Storage)"
-        A1[cfzt.cloudflare.com/enabled: 'true']
-        A2[cfzt.cloudflare.com/hostname: 'app.example.com']
-        A3[cfzt.cloudflare.com/hostnameRouteId: 'tunnel-id']
-        A4[cfzt.cloudflare.com/accessAppId: 'app-uuid']
-        A5[cfzt.cloudflare.com/accessPolicyIds: 'policy-uuid']
-        A6[cfzt.cloudflare.com/serviceTokenId: 'token-uuid']
-        A7[cfzt.cloudflare.com/serviceTokenSecretName: 'app-cfzt-token']
-        A8[cfzt.cloudflare.com/lastReconcile: '2026-02-18T10:00:00Z']
+    subgraph "State ConfigMap cfzt-namespace-name"
+        CM1[annotation_hash: sha256 of cfzt annotations]
+        CM2[cloudflare_ids: JSON map of resource IDs]
+        CM3[last_sync_time: ISO timestamp]
     end
-    
-    subgraph "User-Provided"
-        UP[A1, A2]
+
+    subgraph "HTTPRoute Annotations"
+        A1[cfzt.cloudflare.com/enabled: true — user]
+        A2[cfzt.cloudflare.com/hostname: app.example.com — user]
+        A3[cfzt.cloudflare.com/hostnameRouteId — operator]
+        A4[cfzt.cloudflare.com/accessAppId — operator]
+        A5[cfzt.cloudflare.com/accessPolicyIds — operator]
+        A6[cfzt.cloudflare.com/serviceTokenId — operator]
     end
-    
-    subgraph "Operator-Managed"
-        OM[A3, A4, A5, A6, A7, A8]
+
+    subgraph "kube_worker"
+        KW_CHECK[check_state.yml]
+        KW_PROC[process_completed_task.yml]
     end
-    
-    UP -.input.-> OPERATOR[Operator]
-    OPERATOR -.updates.-> OM
-    OM -.used for.-> UPDATE[Updates/Deletions]
+
+    subgraph "cloudflare_worker"
+        CW_EXEC[execute_task.yml]
+    end
+
+    KW_CHECK -->|reads annotation hash| CM1
+    KW_CHECK -->|writes updated hash| CM1
+    KW_CHECK -->|reads desired state| A1
+    KW_CHECK -->|reads desired state| A2
+    CW_EXEC -->|returns IDs via CloudflareTask status| KW_PROC
+    KW_PROC -->|patches result IDs| A3
+    KW_PROC -->|patches result IDs| A4
+    KW_PROC -->|patches result IDs| A5
+    KW_PROC -->|patches result IDs| A6
+    KW_PROC -->|writes IDs| CM2
 ```
 
 **State Tracking Strategy**:
-- **User annotations**: Define desired state (enabled, hostname, accessApp, etc.)
-- **Operator annotations**: Track Cloudflare resource IDs for updates/deletions
-- **Idempotency**: Use stored IDs to update existing resources instead of creating duplicates
-- **Deletion**: Use stored IDs to clean up Cloudflare resources when HTTPRoute is deleted
+- **State ConfigMap** (`cfzt-{namespace}-{name}`): Primary change-detection store — holds SHA256 annotation hash and Cloudflare resource IDs
+- **User annotations**: Define desired state (`enabled`, `hostname`, `template`, etc.)
+- **Operator annotations**: Result IDs written back after `cloudflare_worker` completes a task
+- **Idempotency**: Stored IDs used to PATCH existing resources instead of creating duplicates
+- **Deletion**: Stored IDs used to clean up Cloudflare resources when HTTPRoute is deleted
 
 ## Security Architecture
 
@@ -828,42 +857,47 @@ graph TB
     subgraph "ServiceAccount Permissions"
         SA[cloudflare-zero-trust-operator SA]
     end
-    
+
     subgraph "Can Read"
         R1[CloudflareZeroTrustTenant]
-        R2[HTTPRoute]
-        R3[Secrets]
+        R2[CloudflareZeroTrustOperatorConfig]
+        R3[HTTPRoute]
+        R4[Secrets - referenced by tenant]
+        R5[Deployments - own only]
     end
-    
+
     subgraph "Can Write"
         W1[CloudflareZeroTrustTenant status]
-        W2[HTTPRoute annotations]
-        W3[Service Token Secrets]
-        W4[Events]
-        W5[ConfigMaps - State Tracking]
+        W2[CloudflareTask CRs - create/patch/delete]
+        W3[HTTPRoute annotations]
+        W4[Service Token Secrets]
+        W5[Events]
+        W6[ConfigMaps - State Tracking]
+        W7[Own Deployment - patch - manager only]
     end
-    
+
     subgraph "Cannot Access"
         X1[Other Secrets - not referenced by tenant]
-        X2[Deployments]
+        X2[Other Deployments]
         X3[Other Resources]
     end
-    
+
     SA --> R1
     SA --> R2
     SA --> R3
+    SA --> R4
+    SA --> R5
     SA --> W1
     SA --> W2
     SA --> W3
     SA --> W4
     SA --> W5
-    SA --> W3
-    SA --> W4
-    
+    SA --> W6
+    SA --> W7
+
     style X1 fill:#E53935
     style X2 fill:#E53935
     style X3 fill:#E53935
-    style X4 fill:#E53935
 ```
 
 **Principle of Least Privilege**:

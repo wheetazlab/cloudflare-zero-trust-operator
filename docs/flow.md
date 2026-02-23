@@ -304,30 +304,33 @@ kubectl describe cfztconfig operator-config -n cloudflare-zero-trust
 
 ```mermaid
 sequenceDiagram
-    participant Entry as entrypoint.sh
-    participant Shell as Shell Process
+    participant Shell as entrypoint.sh
     participant Ansible as ansible-playbook
-    participant Play1 as Play 1: Startup
-    participant Play2 as Play 2: Reconcile
-    
-    Entry->>Shell: Start infinite loop
+    participant Role as Role (from ROLE env var)
+
+    Shell->>Shell: Read ROLE env var
     Shell->>Ansible: ansible-playbook reconcile.yml
-    
-    Ansible->>Play1: Execute Play 1
-    Note over Play1: Display startup info<br/>Call reconciliation_loop role
-    
-    Play1->>Play2: Include Play 2
-    Note over Play2: List tenants<br/>List HTTPRoutes<br/>Reconcile each tenant
-    
-    Play2-->>Ansible: Return (exit code)
-    Ansible-->>Shell: Return (exit code)
-    
+
+    alt ROLE=manager
+        Ansible->>Role: operator_config role
+        Note over Role: Fetch OperatorConfig CR<br/>Patch own Deployment if changed<br/>Ensure kube_worker Deployment exists<br/>Ensure cloudflare_worker Deployment exists
+    else ROLE=kube_worker
+        Ansible->>Role: kube_worker role
+        Note over Role: collect_results.yml<br/>list_tenants / list_httproutes<br/>reconcile_tenant × each tenant<br/>cleanup_orphaned
+    else ROLE=cloudflare_worker
+        Ansible->>Role: cloudflare_worker role
+        Note over Role: List Pending CloudflareTask CRs<br/>claim_and_execute × each task<br/>Report Completed or Failed
+    end
+
+    Role-->>Ansible: Return
+    Ansible-->>Shell: Exit code
+
     alt Success (exit code 0)
         Shell->>Shell: Log: "Reconciliation completed"
     else Failure (exit code != 0)
         Shell->>Shell: Log: "Reconciliation failed"
     end
-    
+
     Shell->>Shell: sleep ${POLL_INTERVAL_SECONDS}
     Shell->>Ansible: Next iteration
 ```
@@ -336,30 +339,29 @@ sequenceDiagram
 
 ```yaml
 # ansible/playbooks/reconcile.yml
-
-# Play 1: Startup and loop wrapper
-- name: Cloudflare Zero Trust Operator Reconciliation
+# Dispatches to the correct role based on the ROLE environment variable.
+- name: Cloudflare Zero Trust Operator
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Display operator startup information
-    - name: Start reconciliation loop
-      include_role: reconciliation_loop
+    - name: Display startup information
+      ansible.builtin.debug:
+        msg: "Running as ROLE={{ lookup('env', 'ROLE') }}"
 
-# Play 2: Actual reconciliation (called by reconciliation_loop)
-- name: Reconcile Cloudflare Zero Trust Resources
-  hosts: localhost
-  gather_facts: false
-  tasks:
-    - name: Get all CloudflareZeroTrustTenant resources
-      include_role: k8s_watch (list_tenants.yml)
-    
-    - name: Get all HTTPRoute resources
-      include_role: k8s_watch (list_httproutes.yml)
-    
-    - name: Reconcile each tenant
-      include_role: tenant_reconcile
-      loop: "{{ cfzt_tenants }}"
+    - name: Run operator_config role (manager pod)
+      include_role:
+        name: operator_config
+      when: lookup('env', 'ROLE') == 'manager'
+
+    - name: Run kube_worker role (kube_worker pod)
+      include_role:
+        name: kube_worker
+      when: lookup('env', 'ROLE') == 'kube_worker'
+
+    - name: Run cloudflare_worker role (cloudflare_worker pod)
+      include_role:
+        name: cloudflare_worker
+      when: lookup('env', 'ROLE') == 'cloudflare_worker'
 ```
 
 ## Playbook Execution
@@ -368,48 +370,40 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    START([ansible-playbook reconcile.yml]) --> PLAY1[Play 1: Operator Startup]
-    
-    PLAY1 --> TASK1[Task: Display startup info]
-    TASK1 --> TASK2[Task: Start reconciliation loop]
-    
-    TASK2 --> LOOP_ROLE[Role: reconciliation_loop]
-    
-    LOOP_ROLE --> TRIGGER[Trigger: Include Play 2]
-    
-    TRIGGER --> PLAY2[Play 2: Reconcile Resources]
-    
-    PLAY2 --> OP_CONFIG[Task: Check operator configuration]
-    OP_CONFIG --> ROLE_OP_CONFIG[Role: operator_config]
-    ROLE_OP_CONFIG --> K8S_TENANTS[Task: Get CloudflareZeroTrustTenant CRs]
-    
-    K8S_TENANTS --> ROLE_K8S_T[Role: k8s_watch/list_tenants.yml]
-    ROLE_K8S_T --> SET_TENANTS[Set Fact: cfzt_tenants]
-    
-    SET_TENANTS --> K8S_IR[Task: Get HTTPRoute resources]
-    K8S_IR --> ROLE_K8S_IR[Role: k8s_watch/list_httproutes.yml]
-    ROLE_K8S_IR --> SET_IR[Set Fact: cfzt_httproutes]
-    
-    SET_IR --> TENANT_LOOP{For Each Tenant}
-    
-    TENANT_LOOP -->|Next| ROLE_RECON[Role: tenant_reconcile]
-    TENANT_LOOP -->|Done| CLEANUP[Task: Cleanup orphaned ConfigMaps]
-    
-    ROLE_RECON --> TENANT_LOOP
-    
-    CLEANUP --> ROLE_CLEANUP[Role: state_manager/cleanup_orphaned.yml]
-    ROLE_CLEANUP --> RETURN[Return to reconciliation_loop]
-    
-    RETURN --> SLEEP[Sleep POLL_INTERVAL_SECONDS]
-    SLEEP --> TRIGGER
-    
+    START([ansible-playbook reconcile.yml]) --> ROLE_CHECK{ROLE env var}
+
+    ROLE_CHECK -->|manager| MGR[operator_config role]
+    MGR --> MGR1[fetch OperatorConfig CR]
+    MGR1 --> MGR2[apply_config.yml<br/>patch own Deployment]
+    MGR2 --> MGR3[manage_worker_deployments.yml<br/>ensure kube_worker + cloudflare_worker Deployments]
+    MGR3 --> MGR4[update_status.yml<br/>write CR conditions]
+    MGR4 --> DONE([sleep + next iteration])
+
+    ROLE_CHECK -->|kube_worker| KW[kube_worker role]
+    KW --> KW1[collect_results.yml<br/>process Completed/Failed tasks]
+    KW1 --> KW2[list_tenants.yml]
+    KW2 --> KW3[list_httproutes.yml]
+    KW3 --> KW4{For Each Tenant}
+    KW4 -->|next| KW5[reconcile_tenant.yml]
+    KW5 --> KW6[check_state.yml<br/>annotation hash vs ConfigMap]
+    KW6 -->|changed| KW7[create_task.yml<br/>create CloudflareTask CR]
+    KW6 -->|no change| KW4
+    KW7 --> KW4
+    KW4 -->|done| KW8[cleanup_orphaned.yml]
+    KW8 --> DONE
+
+    ROLE_CHECK -->|cloudflare_worker| CW[cloudflare_worker role]
+    CW --> CW1[List Pending CloudflareTask CRs]
+    CW1 --> CW2[claim_and_execute.yml × each task]
+    CW2 --> CW3[execute_task.yml<br/>call cloudflare_api tasks]
+    CW3 -->|ok| CW4[report_result.yml<br/>phase → Completed]
+    CW3 -->|error| CW5[rescue<br/>phase → Failed]
+    CW4 --> DONE
+    CW5 --> DONE
+
     style START fill:#4CAF50
-    style PLAY1 fill:#2196F3
-    style PLAY2 fill:#2196F3
-    style OP_CONFIG fill:#9C27B0
-    style TENANT_LOOP fill:#FF9800
-    style CLEANUP fill:#FF5722
-    style SLEEP fill:#E91E63
+    style DONE fill:#E91E63
+    style ROLE_CHECK fill:#FF9800
 ```
 
 ## Role Details

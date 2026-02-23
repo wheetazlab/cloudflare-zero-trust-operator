@@ -43,13 +43,13 @@
     # Phase 3: Discover all tenants
     - name: Get all CloudflareZeroTrustTenant resources
       include_role:
-        name: k8s_watch
+        name: kube_worker
         tasks_from: list_tenants.yml
 
     # Phase 4: Discover all HTTPRoutes
     - name: Get all HTTPRoute resources
       include_role:
-        name: k8s_watch
+        name: kube_worker
         tasks_from: list_httproutes.yml
 
     # Phase 5: For each tenant, reconcile its HTTPRoutes into CloudflareTask CRs

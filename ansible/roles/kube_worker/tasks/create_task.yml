@@ -1,7 +1,7 @@
 ---
 # kube_worker — create or update a CloudflareTask CR for a single HTTPRoute.
-# Contains all K8s-state decision logic that was previously in
-# tenant_reconcile/tasks/reconcile_httproute.yml (Steps 0-3).
+# Contains all K8s-state decision logic: state check, template load,
+# settings merge, zone ID resolution, and CloudflareTask CR creation.
 # The resulting CloudflareTask CR is consumed by cloudflare_worker.
 #
 # Variables (set by reconcile_tenant.yml):

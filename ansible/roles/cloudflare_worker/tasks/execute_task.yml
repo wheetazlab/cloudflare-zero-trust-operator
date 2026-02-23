@@ -1,8 +1,8 @@
 ---
 # cloudflare_worker — execute_task.yml
 # Executes all Cloudflare API operations defined in cfzt_task.spec.operations.
-# Maps directly to the Cloudflare API calls that were previously in
-# tenant_reconcile/tasks/reconcile_httproute.yml (Steps 1-4 / dns-only block).
+# Executes tunnel route, CNAME DNS, Access app/policy, service token,
+# and dns-only A record operations based on the task spec.
 #
 # Variables (provided by claim_and_execute.yml / parent scope):
 #   - cfzt_task: The full CloudflareTask resource

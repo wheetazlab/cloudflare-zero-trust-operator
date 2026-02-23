@@ -1,7 +1,7 @@
 ---
 # kube_worker — reconcile a single CloudflareZeroTrustTenant
-# Mirrors tenant_reconcile/tasks/main.yml but creates CloudflareTask CRs
-# instead of making direct Cloudflare API calls.
+# Creates CloudflareTask CRs for each changed HTTPRoute instead of
+# making direct Cloudflare API calls.
 #
 # Variables:
 #   - tenant: The CloudflareZeroTrustTenant resource

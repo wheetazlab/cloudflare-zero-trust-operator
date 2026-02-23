@@ -27,7 +27,13 @@
 
 - name: Filter HTTPRoutes with cfzt enabled
   ansible.builtin.set_fact:
-    cfzt_httproutes: "{{ all_httproutes | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined') | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true') | list }}"
+    cfzt_httproutes: >-
+      {{
+        all_httproutes
+        | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined')
+        | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true')
+        | list
+      }}
 
 - name: Display HTTPRoute count
   ansible.builtin.debug:

@@ -14,9 +14,7 @@
 
 # Step 0: Check if reconciliation is needed
 - name: Check HTTPRoute state
-  include_role:
-    name: state_manager
-    tasks_from: check_state.yml
+  include_tasks: check_state.yml
   vars:
     httproute: "{{ httproute }}"
     operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"

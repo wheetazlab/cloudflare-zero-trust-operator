@@ -4,7 +4,7 @@
 #   1. Extracts result IDs from task.status.result
 #   2. Patches HTTPRoute annotations with Cloudflare resource IDs
 #   3. Creates K8s Secret for service token credentials (if task produced one)
-#   4. Updates state_manager ConfigMap
+#   4. Updates HTTPRoute state ConfigMap
 #   5. Deletes the CloudflareTask CR
 #
 # Variables (via include_tasks loop):
@@ -76,12 +76,10 @@
     - ct_service_token_client_id | length > 0
     - ct_service_token_client_secret | length > 0
 
-# ─── Update state_manager ConfigMap ──────────────────────────────────────────
+# ─── Update HTTPRoute state ConfigMap ────────────────────────────────────────
 
 - name: Update HTTPRoute state
-  include_role:
-    name: state_manager
-    tasks_from: update_state.yml
+  include_tasks: update_state.yml
   vars:
     state_configmap_name: "cfzt-{{ ct_route_namespace }}-{{ ct_route_name }}"
     ir_name: "{{ ct_route_name }}"

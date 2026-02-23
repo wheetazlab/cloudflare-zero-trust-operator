@@ -1,0 +1,22 @@
+apiVersion: v2
+name: cloudflare-zero-trust-operator
+description: >
+  A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by
+  watching HTTPRoute resources and reconciling them with the Cloudflare API.
+  The operator is packaged as a container running Ansible roles.
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - cloudflare
+  - zero-trust
+  - tunnel
+  - operator
+  - gateway-api
+  - httproute
+home: https://github.com/wheetazlab/cloudflare-zero-trust-operator
+sources:
+  - https://github.com/wheetazlab/cloudflare-zero-trust-operator
+maintainers:
+  - name: wheetazlab
+    url: https://github.com/wheetazlab

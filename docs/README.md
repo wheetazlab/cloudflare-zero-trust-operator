@@ -83,7 +83,7 @@ metadata:
     # Tenant to use (optional if only one tenant in namespace)
     cfzt.cloudflare.com/tenant: "prod-tenant"
 spec:
-  # ... Traefik routing config ...
+  # ... Gateway API routing config ...
 ```
 
 #### Step 2: Template Definition
@@ -228,7 +228,7 @@ spec:
 ### Template Fields
 
 #### originService
-- **url** (string): Origin service URL (e.g., `https://traefik.traefik.svc:443`)
+- **url** (string): Origin service URL (e.g., `https://my-ingress.namespace.svc:443`)
 - **httpRedirect** (bool, default: true): Auto-redirect HTTP to HTTPS at Cloudflare edge
 - **originTLS** (object): TLS configuration for HTTPS origins
   - **noTLSVerify** (bool, default: false): Skip certificate verification

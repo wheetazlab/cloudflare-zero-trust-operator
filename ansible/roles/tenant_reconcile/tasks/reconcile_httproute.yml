@@ -57,7 +57,7 @@
     # Step 2: Merge template with tenant defaults (template takes precedence)
     - name: Merge origin service settings (template > tenant defaults)
       ansible.builtin.set_fact:
-        origin_service: "{{ template_spec.originService.url | default(tenant_defaults.originService | default('http://traefik.traefik.svc:80')) }}"
+        origin_service: "{{ template_spec.originService.url | default(tenant_defaults.originService | default('')) }}"
         http_redirect: "{{ template_spec.originService.httpRedirect | default(tenant_defaults.httpRedirect | default(true)) }}"
 
     - name: Merge origin TLS settings (template > tenant defaults)

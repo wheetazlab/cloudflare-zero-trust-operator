@@ -1,0 +1,85 @@
+{{- if .Values.rbac.create }}
+---
+# ClusterRole: full operator permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+rules:
+  # CRDs owned by this operator
+  - apiGroups: ["cfzt.cloudflare.com"]
+    resources:
+      - cloudflarezerotrusttenants
+      - cloudflarezerotrustoperatorconfigs
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cfzt.cloudflare.com"]
+    resources:
+      - cloudflarezerotrusttenants/status
+      - cloudflarezerotrustoperatorconfigs/status
+    verbs: ["get", "patch", "update"]
+  # Self-update – locked to the operator Deployment only
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: [{{ include "cloudflare-zero-trust-operator.fullname" . | quote }}]
+    verbs: ["get", "list", "patch", "update"]
+  # Gateway API – watches HTTPRoutes to build tunnel routing
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Core resources
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+# ClusterRoleBinding: operator ClusterRole → ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cloudflare-zero-trust-operator.serviceAccountName" . }}
+    namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+---
+# ClusterRole: read-only secret access (separate role for least-privilege clarity)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding: secrets read role → ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cloudflare-zero-trust-operator.serviceAccountName" . }}
+    namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+{{- end }}

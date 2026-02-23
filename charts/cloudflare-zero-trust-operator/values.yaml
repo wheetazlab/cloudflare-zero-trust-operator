@@ -1,0 +1,120 @@
+# Override the chart name used in resource names and labels.
+nameOverride: ""
+# Override the fully qualified app name used in resource names.
+fullnameOverride: ""
+
+# -------------------------------------------------------------------
+# Image settings
+# -------------------------------------------------------------------
+image:
+  registry: ghcr.io
+  repository: wheetazlab/cloudflare-zero-trust-operator
+  # tag defaults to the chart's appVersion when left empty
+  tag: ""
+  pullPolicy: Always
+
+imagePullSecrets: []
+
+# -------------------------------------------------------------------
+# Namespace
+# -------------------------------------------------------------------
+# The namespace in which the operator is installed.
+# If createNamespace is true the chart will create it.
+namespaceOverride: ""
+createNamespace: true
+
+# -------------------------------------------------------------------
+# Operator runtime switches
+# These become environment variables in the operator container.
+# -------------------------------------------------------------------
+operator:
+  # Comma-separated list of namespaces to watch for HTTPRoutes.
+  # Leave empty to watch ALL namespaces (cluster-wide).
+  watchNamespaces: ""
+
+  # How often (in seconds) the operator polls Cloudflare and reconciles.
+  pollIntervalSeconds: 60
+
+  # Log verbosity: DEBUG | INFO | WARNING | ERROR
+  logLevel: INFO
+
+  # Cloudflare REST API base URL – override only if using a proxy/mock.
+  cloudflareApiBase: "https://api.cloudflare.com/client/v4"
+
+  # Any extra environment variables to inject into the operator container.
+  # Useful for proxy settings, tracing endpoints, etc.
+  # extraEnv:
+  #   - name: HTTP_PROXY
+  #     value: "http://proxy.example.com:3128"
+  extraEnv: []
+
+# -------------------------------------------------------------------
+# Replica count
+# The CloudflareZeroTrustOperatorConfig CRD can also control this
+# at runtime without a Helm upgrade.
+# -------------------------------------------------------------------
+replicaCount: 1
+
+# -------------------------------------------------------------------
+# Resource requests / limits
+# -------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -------------------------------------------------------------------
+# ServiceAccount
+# -------------------------------------------------------------------
+serviceAccount:
+  # Set to false to bring your own ServiceAccount.
+  create: true
+  # Override the generated name (defaults to the full chart name).
+  name: ""
+  annotations: {}
+
+# -------------------------------------------------------------------
+# Pod scheduling
+# -------------------------------------------------------------------
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+priorityClassName: ""
+
+# -------------------------------------------------------------------
+# Pod / container metadata
+# -------------------------------------------------------------------
+podAnnotations: {}
+podLabels: {}
+
+# -------------------------------------------------------------------
+# Security contexts
+# These match the hardened defaults shipped in config/deployment/.
+# -------------------------------------------------------------------
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# -------------------------------------------------------------------
+# RBAC
+# Set to false if you are managing RBAC outside of this chart.
+# -------------------------------------------------------------------
+rbac:
+  create: true

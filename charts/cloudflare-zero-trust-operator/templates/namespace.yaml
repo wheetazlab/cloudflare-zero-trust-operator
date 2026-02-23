@@ -1,0 +1,8 @@
+{{- if .Values.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+{{- end }}

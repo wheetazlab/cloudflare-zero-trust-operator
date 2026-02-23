@@ -943,8 +943,6 @@ graph TB
     style SUCCESS fill:#4CAF50
 ```
 
-**Health Check Script**: `scripts/health-check.sh`
-
 ## Summary
 
 The Cloudflare Zero Trust Operator follows a straightforward architecture:

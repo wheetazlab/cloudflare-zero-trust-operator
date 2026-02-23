@@ -7,8 +7,8 @@ exclude_paths:
   - .github/
   - docs/
   - examples/
-  - scripts/
   - container/
+  - charts/
 
 skip_list:
   - yaml[line-length]  # Allow longer lines in some cases

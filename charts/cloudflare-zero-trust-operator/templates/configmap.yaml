@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-config
+  namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # Operator runtime configuration
+    # Environment variables override these values at container startup.
+    poll_interval_seconds: {{ .Values.operator.pollIntervalSeconds }}
+    log_level: {{ .Values.operator.logLevel }}
+    cloudflare_api_base: {{ .Values.operator.cloudflareApiBase | quote }}
+    {{- if .Values.operator.watchNamespaces }}
+    watch_namespaces: {{ .Values.operator.watchNamespaces | quote }}
+    {{- else }}
+    watch_namespaces: ""  # empty = watch all namespaces
+    {{- end }}

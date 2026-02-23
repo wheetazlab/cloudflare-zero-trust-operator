@@ -1,0 +1,48 @@
+Cloudflare Zero Trust Operator has been installed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+Image:     {{ include "cloudflare-zero-trust-operator.image" . }}
+
+Operator switches:
+  WATCH_NAMESPACES      = {{ .Values.operator.watchNamespaces | default "(all namespaces)" | quote }}
+  POLL_INTERVAL_SECONDS = {{ .Values.operator.pollIntervalSeconds }}
+  LOG_LEVEL             = {{ .Values.operator.logLevel }}
+  CLOUDFLARE_API_BASE   = {{ .Values.operator.cloudflareApiBase }}
+
+Three CRDs were installed:
+  - cloudflarezerotrusttenants.cfzt.cloudflare.com
+  - cloudflarezerotrusttemplates.cfzt.cloudflare.com
+  - cloudflarezerotrustoperatorconfigs.cfzt.cloudflare.com
+
+Next steps:
+
+1. Create a Kubernetes Secret with your Cloudflare API token in the target namespace:
+
+   kubectl create secret generic my-cf-token \
+     --from-literal=token=<YOUR_CLOUDFLARE_API_TOKEN> \
+     -n {{ include "cloudflare-zero-trust-operator.namespace" . }}
+
+2. Create a CloudflareZeroTrustTenant referencing that secret:
+
+   kubectl apply -f - <<EOF
+   apiVersion: cfzt.cloudflare.com/v1alpha1
+   kind: CloudflareZeroTrustTenant
+   metadata:
+     name: my-tenant
+     namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
+   spec:
+     accountId: "<32-char-hex-account-id>"
+     tunnelId:  "<tunnel-uuid>"
+     credentialRef:
+       name: my-cf-token
+   EOF
+
+3. Verify the operator is running:
+
+   kubectl get pods -n {{ include "cloudflare-zero-trust-operator.namespace" . }}
+   kubectl logs -n {{ include "cloudflare-zero-trust-operator.namespace" . }} \
+     -l app.kubernetes.io/name={{ include "cloudflare-zero-trust-operator.name" . }}
+
+For full documentation see:
+  https://github.com/wheetazlab/cloudflare-zero-trust-operator

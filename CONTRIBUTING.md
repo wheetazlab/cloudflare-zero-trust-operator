@@ -125,8 +125,8 @@ kubectl logs -n cloudflare-zero-trust -l app=cloudflare-zero-trust-operator -f
 │   ├── entrypoint.sh          # Container entrypoint script
 │   └── requirements.txt       # Python dependencies
 ├── docs/                      # Documentation
-├── examples/                  # Example configurations
-├── scripts/                   # Helper scripts
+├── charts/                    # Helm chart for operator deployment
+├── examples/                  # Example CR configurations
 └── .github/workflows/         # CI/CD workflows
 ```
 

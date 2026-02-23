@@ -86,7 +86,7 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 4. **Access Policies** — configures who can access your applications (email, groups, etc.)
 5. **Service Tokens** — creates tokens for machine-to-machine authentication
 6. **DNS-only A records** — for internal services reachable via DNS but not tunnelled (see [DNS-only mode](charts/cloudflare-zero-trust-operator/README.md#dns-only-mode-internal--direct-to-cluster-routing))
-7. **State tracking** — stores all Cloudflare resource IDs in HTTPRoute annotations for idempotent updates and clean deletion
+7. **State tracking** — uses per-HTTPRoute ConfigMaps (`cfzt-{namespace}-{name}`) to detect annotation changes via SHA256 hash (avoiding unnecessary API calls), and writes result Cloudflare resource IDs back to HTTPRoute annotations for idempotent updates and clean deletion
 
 ## Requirements
 

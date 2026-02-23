@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+LABEL org.opencontainers.image.description="Ansible-based Kubernetes operator that watches HTTPRoute resources and reconciles them with the Cloudflare API to manage tunnel routing, Access Applications, and service tokens."
+LABEL org.opencontainers.image.source="https://github.com/wheetazlab/cloudflare-zero-trust-operator"
+LABEL org.opencontainers.image.licenses="MIT"
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \

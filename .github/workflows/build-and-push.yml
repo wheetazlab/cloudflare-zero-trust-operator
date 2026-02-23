@@ -118,10 +118,10 @@ jobs:
       - name: Create and push multi-arch manifest
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(jq -cr '.annotations | map("--annotation \"index:" + . + "\"") | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          mapfile -t tags < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          mapfile -t annotations < <(jq -r '.annotations[] | "--annotation", ("index:" + ltrimstr("manifest:"))' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          mapfile -t digests < <(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s\n' *)
+          docker buildx imagetools create "${tags[@]}" "${annotations[@]}" "${digests[@]}"
 
       - name: Inspect manifest
         id: inspect

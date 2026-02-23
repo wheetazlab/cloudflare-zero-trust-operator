@@ -414,701 +414,166 @@ flowchart TD
 
 ## Role Details
 
-### Role 1: reconciliation_loop
+The operator is implemented as four Ansible roles. Each role has a dedicated README with task-level flow diagrams.
 
-**Purpose**: Wrapper that creates infinite reconciliation loop
-
-**Location**: `ansible/roles/reconciliation_loop/tasks/main.yml`
-
-```mermaid
-flowchart TD
-    START([reconciliation_loop role called]) --> LOG[Display: Starting reconciliation loop]
-    
-    LOG --> BLOCK[Begin: block]
-    
-    BLOCK --> EXEC[Execute: ansible-playbook reconcile.yml --skip-tags loop]
-    EXEC --> CHECK{Exit Code?}
-    
-    CHECK -->|0 Success| LOG_OK[Log: Reconciliation completed successfully]
-    CHECK -->|Non-zero| LOG_FAIL[Log: Reconciliation failed]
-    
-    LOG_OK --> WAIT[Pause: reconcile_interval seconds]
-    LOG_FAIL --> WAIT
-    
-    WAIT --> RECURSE[Include: main.yml recursively]
-    
-    BLOCK -.on error.-> RESCUE[Rescue Block]
-    RESCUE --> LOG_ERROR[Log: Reconciliation error occurred]
-    LOG_ERROR --> WAIT2[Pause: reconcile_interval seconds]
-    WAIT2 --> RECURSE2[Include: main.yml recursively]
-    
-    RECURSE --> START
-    RECURSE2 --> START
-    
-    style START fill:#4CAF50
-    style RECURSE fill:#E91E63
-    style RECURSE2 fill:#E91E63
-```
-
-**Key Tasks**:
-1. Run the main playbook (skipping itself to avoid infinite inception)
-2. Log the result
-3. Wait for the configured interval
-4. Call itself recursively (infinite loop)
-5. Handle errors gracefully (rescue block)
+| Role | Pod | README |
+|---|---|---|
+| `operator_config` | manager, kube_worker | [ansible/roles/operator_config/README.md](../ansible/roles/operator_config/README.md) |
+| `kube_worker` | kube_worker | [ansible/roles/kube_worker/README.md](../ansible/roles/kube_worker/README.md) |
+| `cloudflare_worker` | cloudflare_worker | [ansible/roles/cloudflare_worker/README.md](../ansible/roles/cloudflare_worker/README.md) |
+| `cloudflare_api` | cloudflare_worker | [ansible/roles/cloudflare_api/README.md](../ansible/roles/cloudflare_api/README.md) |
 
 ---
 
-### Role 2: k8s_watch
+### Role: `operator_config`
 
-**Purpose**: Discover Kubernetes resources (Tenants and HTTPRoutes)
+**Pod:** manager, kube_worker  
+**Entrypoint:** `tasks/main.yml`
 
-**Location**: `ansible/roles/k8s_watch/tasks/`
-
-#### Task File: list_tenants.yml
-
-```mermaid
-flowchart TD
-    START([list_tenants.yml]) --> K8S[kubernetes.core.k8s_info]
-    
-    K8S --> API[Query: CloudflareZeroTrustTenant]
-    API --> REG[Register: tenant_list]
-    
-    REG --> SET[Set Fact: cfzt_tenants]
-    SET --> COUNT[Debug: Display tenant count]
-    
-    COUNT --> DETAIL{Verbosity >= 2?}
-    DETAIL -->|Yes| LOOP[Loop: Display each tenant]
-    DETAIL -->|No| END([Done])
-    
-    LOOP --> END
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
-```
-
-**Output**: 
-- Variable `cfzt_tenants`: List of all CloudflareZeroTrustTenant resources
-
-**Example**:
-```yaml
-cfzt_tenants:
-  - metadata:
-      name: prod-tenant
-      namespace: default
-    spec:
-      accountId: "abc123..."
-      tunnelId: "uuid..."
-      credentialRef:
-        name: cloudflare-api-token
-```
-
-#### Task File: list_httproutes.yml
+Reads the `CloudflareZeroTrustOperatorConfig` CR and self-manages the operator Deployment. The manager pod uses it to create the worker Deployments on startup; the kube_worker uses it to apply configuration changes and write CR status.
 
 ```mermaid
-flowchart TD
-    START([list_httproutes.yml]) --> CHECK{namespaces empty?}
-    
-    CHECK -->|Yes, watch all| ALL[kubernetes.core.k8s_info<br/>No namespace filter]
-    CHECK -->|No, specific namespaces| LOOP[Loop through namespaces]
-    
-    ALL --> SET_ALL[Set: all_httproutes]
-    
-    LOOP --> EACH[kubernetes.core.k8s_info<br/>namespace: item]
-    EACH --> COMBINE[Combine: all results]
-    COMBINE --> SET_SPECIFIC[Set: all_httproutes]
-    
-    SET_ALL --> FILTER[Filter: cfzt.cloudflare.com/enabled=true]
-    SET_SPECIFIC --> FILTER
-    
-    FILTER --> SET_FILTERED[Set: cfzt_httproutes]
-    SET_FILTERED --> COUNT[Debug: Display counts]
-    
-    COUNT --> END([Done])
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
+flowchart LR
+    MAIN["main.yml
+fetch OperatorConfig CR"]
+    AC["apply_config.yml
+patch operator Deployment"]
+    WD["manage_worker_deployments.yml
+create kube_worker + cloudflare_worker Deployments"]
+    US["update_status.yml
+write Applied + Ready conditions to CR"]
+
+    MAIN --> AC --> WD --> US
 ```
 
-**Output**:
-- Variable `all_httproutes`: All HTTPRoute resources (in watched namespaces)
-- Variable `cfzt_httproutes`: Filtered HTTPRoutes with `cfzt.cloudflare.com/enabled: "true"`
+**Key task files:**
 
-**Filtering Logic**:
-```jinja2
-{{ all_httproutes 
-   | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined') 
-   | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true') 
-   | list }}
-```
+| Task | Purpose |
+|---|---|
+| `main.yml` | Fetch `CloudflareZeroTrustOperatorConfig` CR |
+| `apply_config.yml` | Merge CR spec onto operator Deployment (replicas, resources, env vars, scheduling) |
+| `manage_worker_deployments.yml` | Create/update kube_worker and cloudflare_worker Deployments (same image, different `ROLE` env) |
+| `update_status.yml` | Write `Applied` and `Ready` conditions + `observedGeneration` to CR status |
 
 ---
 
-### Role 3: state_manager
+### Role: `kube_worker`
 
-**Purpose**: Manage state tracking ConfigMaps for HTTPRoutes
+**Pod:** kube_worker  
+**Entrypoints:** individual task files called from `reconcile_kube_worker.yml` (no `main.yml`)
 
-**Location**: `ansible/roles/state_manager/tasks/`
-
-The state_manager role has three task files:
-
-#### Task File: check_state.yml
-
-**Purpose**: Determine if HTTPRoute needs reconciliation
+Kubernetes state manager. Monitors tenants and HTTPRoutes, creates `CloudflareTask` CRs as a work queue, and collects results back from completed tasks. Makes zero direct Cloudflare API write calls (only a read-only zone-ID lookup).
 
 ```mermaid
 flowchart TD
-    START([check_state.yml]) --> EXTRACT[Extract HTTPRoute metadata]
-    EXTRACT --> GEN_NAME["Generate ConfigMap name:<br/>cfzt-namespace-name"]
-    
-    GEN_NAME --> PARSE_ANNO["Extract cfzt.cloudflare.com/* annotations"]
-    
-    PARSE_ANNO --> HASH[Calculate SHA256 hash of annotations]
-    
-    HASH --> CHECK_CM["kubernetes.core.k8s_info<br/>Query ConfigMap"]
-    
-    CHECK_CM --> EXISTS{ConfigMap exists?}
-    
-    EXISTS -->|No| NEED["Set: needs_reconciliation = true"]
-    EXISTS -->|Yes| GET_HASH[Get stored annotation_hash]
-    
-    GET_HASH --> COMPARE{Hashes match?}
-    COMPARE -->|No| NEED
-    COMPARE -->|Yes| SKIP["Set: needs_reconciliation = false"]
-    
-    NEED --> END([Done])
-    SKIP --> END
-    
-    style START fill:#4CAF50
-    style NEED fill:#FF9800
-    style SKIP fill:#2196F3
-    style END fill:#2196F3
+    COLLECT["collect_results.yml
+read Completed tasks → patch HTTPRoutes
+create Secrets → delete tasks"]
+    TENANTS["list_tenants.yml
+fetch CloudflareZeroTrustTenant CRs"]
+    ROUTES["list_httproutes.yml
+fetch HTTPRoutes with cfzt enabled"]
+    RECONCILE["reconcile_tenant.yml × each tenant
+filter routes → create_task.yml × each route"]
+
+    COLLECT --> TENANTS --> ROUTES --> RECONCILE
 ```
 
-**Outputs**:
-- `needs_reconciliation`: Boolean indicating if reconciliation required
-- `state_configmap_name`: Name of the state ConfigMap
-- `current_annotation_hash`: Current hash for comparison
+**Key task files:**
 
-#### Task File: update_state.yml
+| Task | Purpose |
+|---|---|
+| `collect_results.yml` | Find Completed/Failed CloudflareTask CRs; call `process_completed_task.yml` for each |
+| `process_completed_task.yml` | Extract result IDs, patch HTTPRoute annotations, create service token Secret, call `update_state.yml`, delete task |
+| `update_state.yml` | Create/update ConfigMap `cfzt-{ns}-{name}` with annotation hash + Cloudflare IDs |
+| `list_tenants.yml` | Fetch all `CloudflareZeroTrustTenant` CRs |
+| `list_httproutes.yml` | Fetch all HTTPRoutes; filter to those with `cfzt.cloudflare.com/enabled: "true"` |
+| `reconcile_tenant.yml` | Extract tenant facts, filter routes, call `create_task.yml` per route |
+| `create_task.yml` | Check state hash → load template → merge settings → resolve zone ID → build + apply CloudflareTask CR |
+| `check_state.yml` | Compare current annotation SHA256 to stored ConfigMap hash |
+| `cleanup_orphaned.yml` | Delete ConfigMaps for HTTPRoutes that no longer exist (utility, not in main loop) |
 
-**Purpose**: Update ConfigMap after successful reconciliation
+**Change detection:**
 
-```mermaid
-flowchart TD
-    START([update_state.yml]) --> TIMESTAMP[Get current timestamp]
-    
-    TIMESTAMP --> BUILD["Build ConfigMap definition<br/>with annotation_hash, cloudflare_ids,<br/>last_sync_time, and HTTPRoute metadata"]
-    
-    BUILD --> CREATE["kubernetes.core.k8s<br/>Create or update ConfigMap"]
-    
-    CREATE --> LABELS["Apply labels for tracking<br/>and ownership"]
-    
-    LABELS --> END([Done])
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
+```
+cfzt_annotations = all annotations matching ^cfzt\.cloudflare\.com/
+current_hash     = sha256(cfzt_annotations | to_json)
+needs_reconciliation = (no ConfigMap) OR (stored_hash != current_hash)
 ```
 
-**Inputs**:
-- `cloudflare_ids`: Dictionary of Cloudflare resource IDs created
-- `current_annotation_hash`: Hash to store
-
-#### Task File: cleanup_orphaned.yml
-
-**Purpose**: Remove ConfigMaps for deleted HTTPRoutes
-
-```mermaid
-flowchart TD
-    START([cleanup_orphaned.yml]) --> LIST_CM[List all state ConfigMaps<br/>with operator labels]
-    
-    LIST_CM --> BUILD_EXPECTED[Build list of expected ConfigMap names<br/>from cfzt_httproutes]
-    
-    BUILD_EXPECTED --> COMPARE[Identify orphaned ConfigMaps]
-    
-    COMPARE --> CHECK{Orphaned found?}
-    
-    CHECK -->|No| LOG_NONE[Log: No cleanup needed]
-    CHECK -->|Yes| DELETE[Loop: Delete each orphaned ConfigMap]
-    
-    DELETE --> LOG_CLEANUP[Log: Cleaned up N ConfigMaps]
-    
-    LOG_NONE --> END([Done])
-    LOG_CLEANUP --> END
-    
-    style START fill:#4CAF50
-    style DELETE fill:#E53935
-    style END fill:#2196F3
-```
-
-**When called**: After all tenants reconciled in each cycle
+**Template merge priority:** `CloudflareZeroTrustTemplate` → `tenant.spec.defaults` → built-in defaults
 
 ---
 
-### Role 4: tenant_reconcile
+### Role: `cloudflare_worker`
 
-**Purpose**: Orchestrate reconciliation for a single tenant
+**Pod:** cloudflare_worker  
+**Entrypoint:** `tasks/main.yml`
 
-**Location**: `ansible/roles/tenant_reconcile/tasks/main.yml`
-
-```mermaid
-flowchart TD
-    START([tenant_reconcile role<br/>loop_var: tenant]) --> EXTRACT[Extract tenant facts]
-    
-    EXTRACT --> SET_FACTS[Set Facts:<br/>- tenant_name<br/>- tenant_namespace<br/>- tenant_account_id<br/>- tenant_tunnel_id<br/>- tenant_credential_ref]
-    
-    SET_FACTS --> GET_SECRET[kubernetes.core.k8s_info<br/>Get API token Secret]
-    
-    GET_SECRET --> CHECK_SECRET{Secret found?}
-    CHECK_SECRET -->|No| FAIL[Fail: Credential secret not found]
-    CHECK_SECRET -->|Yes| DECODE[Base64 decode API token]
-    
-    DECODE --> FILTER_IR[Filter HTTPRoutes for this tenant]
-    
-    FILTER_IR --> FILTER_NS[Filter by namespace]
-    FILTER_NS --> FILTER_ANNO{Has tenant annotation?}
-    
-    FILTER_ANNO -->|Yes| FILTER_MATCH[Filter by tenant name match]
-    FILTER_ANNO -->|No| FILTER_NS
-    
-    FILTER_MATCH --> INIT_COUNT[Initialize counters:<br/>count_hostname_routes = 0<br/>count_access_apps = 0<br/>count_access_policies = 0<br/>count_service_tokens = 0]
-    
-    INIT_COUNT --> IR_LOOP{For Each<br/>HTTPRoute}
-    
-    IR_LOOP -->|Next| RECON_IR[Include Tasks:<br/>reconcile_httproute.yml]
-    IR_LOOP -->|Done| UPDATE_STATUS[Include Tasks:<br/>update_tenant_status.yml]
-    
-    RECON_IR --> IR_LOOP
-    
-    UPDATE_STATUS --> END([Done])
-    
-    style START fill:#4CAF50
-    style IR_LOOP fill:#FF9800
-    style END fill:#2196F3
-```
-
-**Key Logic**:
-
-1. **Extract tenant configuration** from the CloudflareZeroTrustTenant CR
-2. **Retrieve API token** from referenced Secret
-3. **Filter HTTPRoutes** belonging to this tenant:
-   - Same namespace as tenant
-   - If HTTPRoute has `cfzt.cloudflare.com/tenant` annotation, must match tenant name
-   - If no tenant annotation and only one tenant in namespace, use that tenant
-4. **Initialize resource counters** for status tracking
-5. **Reconcile each HTTPRoute** by calling `reconcile_httproute.yml`
-6. **Update tenant status** with summary counts
-
----
-
-### Task File: reconcile_httproute.yml
-
-**Purpose**: Reconcile a single HTTPRoute against Cloudflare
-
-**Location**: `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
+Cloudflare API executor. Claims Pending CloudflareTask CRs and executes all configured Cloudflare API operations in sequence, reporting results back to the task status.
 
 ```mermaid
 flowchart TD
-    START([reconcile_httproute.yml<br/>loop_var: httproute]) --> STATE_CHECK[Step 0: Check state]
-    
-    STATE_CHECK --> CALL_STATE[Include Role: state_manager<br/>tasks_from: check_state.yml]
-    CALL_STATE --> NEEDS{needs_reconciliation?}
-    
-    NEEDS -->|No, unchanged| SKIP[Skip: Log no changes detected]
-    NEEDS -->|Yes, changed/new| EXTRACT[Extract HTTPRoute metadata]
-    
-    SKIP --> END([Done])
-    
-    EXTRACT --> INIT_IDS[Initialize cloudflare_resource_ids dict]
-    
-    INIT_IDS --> PARSE[Parse annotations:<br/>- hostname<br/>- tunnel_id<br/>- origin_service<br/>- create_access_app<br/>- allow_groups<br/>- allow_emails<br/>- session_duration<br/>- create_service_token<br/>- existing_*_ids]
-    
-    PARSE --> VALIDATE{hostname defined?}
-    VALIDATE -->|No| FAIL[Fail: Missing hostname]
-    VALIDATE -->|Yes| STEP1[Step 1: Manage Hostname Route]
-    
-    STEP1 --> CALL_CF1[Include Role: cloudflare_api<br/>tasks_from: manage_hostname_route.yml]
-    CALL_CF1 --> STORE1[Store: tunnel_id, hostname in IDs dict]
-    STORE1 --> INC1[Increment: count_hostname_routes]
-    
-    INC1 --> CHECK_ACCESS{accessApp=true?}
-    
-    CHECK_ACCESS -->|No| CHECK_TOKEN
-    CHECK_ACCESS -->|Yes| STEP2[Step 2: Manage Access App]
-    
-    STEP2 --> CALL_CF2[Include Role: cloudflare_api<br/>tasks_from: manage_access_app.yml]
-    CALL_CF2 --> STORE2[Store: access_app_id in IDs dict]
-    STORE2 --> INC2[Increment: count_access_apps]
-    
-    INC2 --> STEP3[Step 3: Parse allow rules]
-    STEP3 --> PARSE_GROUPS[Parse allow_groups<br/>Split by comma]
-    PARSE_GROUPS --> PARSE_EMAILS[Parse allow_emails<br/>Split by comma]
-    
-    PARSE_EMAILS --> CALL_CF3[Include Role: cloudflare_api<br/>tasks_from: manage_access_policy.yml]
-    CALL_CF3 --> STORE3[Store: access_policy_id in IDs dict]
-    STORE3 --> INC3[Increment: count_access_policies]
-    
-    INC3 --> PATCH_ACCESS[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- accessAppId<br/>- accessPolicyIds]
-    
-    PATCH_ACCESS --> CHECK_TOKEN{serviceToken=true?}
-    
-    CHECK_TOKEN -->|No| FINAL_PATCH
-    CHECK_TOKEN -->|Yes| STEP4[Step 4: Manage Service Token]
-    
-    STEP4 --> CALL_CF4[Include Role: cloudflare_api<br/>tasks_from: manage_service_token.yml]
-    CALL_CF4 --> STORE4[Store: service_token_id in IDs dict]
-    STORE4 --> INC4[Increment: count_service_tokens]
-    
-    INC4 --> CREATE_SECRET{Token created?}
-    CREATE_SECRET -->|Yes| K8S_SECRET[kubernetes.core.k8s<br/>Create Secret with token credentials]
-    CREATE_SECRET -->|No| PATCH_TOKEN
-    
-    K8S_SECRET --> PATCH_TOKEN[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- serviceTokenId<br/>- serviceTokenSecretName]
-    
-    PATCH_TOKEN --> FINAL_PATCH[kubernetes.core.k8s<br/>Patch HTTPRoute with:<br/>- hostnameRouteId<br/>- lastReconcile timestamp]
-    
-    FINAL_PATCH --> UPDATE_STATE[Step 5: Update state]
-    UPDATE_STATE --> CALL_UPDATE[Include Role: state_manager<br/>tasks_from: update_state.yml]
-    CALL_UPDATE --> STORE_STATE[Store in ConfigMap:<br/>- annotation_hash<br/>- cloudflare_ids<br/>- last_sync_time]
-    
-    STORE_STATE --> END
-    
-    style START fill:#4CAF50
-    style NEEDS fill:#FF9800
-    style SKIP fill:#2196F3
-    style CHECK_ACCESS fill:#FF9800
-    style CHECK_TOKEN fill:#FF9800
-    style CREATE_SECRET fill:#FF9800
-    style UPDATE_STATE fill:#FF5722
-    style END fill:#2196F3
+    MAIN["main.yml
+find Pending + unstarted tasks"]
+    CLAIM["claim_and_execute.yml
+claim → execute → report
+(block/rescue guarantees no stuck InProgress)"]
+    EXEC["execute_task.yml
+sequential operations per spec.operations flags"]
+    REPORT["report_result.yml
+patch phase: Completed + status.result"]
+
+    MAIN --> CLAIM --> EXEC --> REPORT
 ```
 
-**Detailed Steps**:
+**Operations executed by `execute_task.yml` (in order, each guarded by `when:`):**
 
-#### Step 0: State Check (NEW)
-- Calculate hash of all `cfzt.cloudflare.com/*` annotations
-- Query state ConfigMap for this HTTPRoute
-- Compare hashes to determine if reconciliation needed
-- **Skip entire reconciliation if no changes detected**
+| # | Operation | `spec.operations` flag | `cloudflare_api` task |
+|---|---|---|---|
+| 1 | Tunnel hostname route | `tunnelRoute.enabled` | `manage_hostname_route.yml` |
+| 2 | CNAME DNS record | `cnameDns.enabled` + zone_id set | `manage_tunnel_cname.yml` |
+| 3 | Access Application | `accessApp.enabled` | `manage_access_app.yml` |
+| 4 | Access Policy | `accessApp.enabled` + no existingPolicyIds | `manage_access_policy.yml` |
+| 5 | Service Token | `serviceToken.enabled` | `manage_service_token.yml` |
+| 6 | DNS A record (dns-only) | `dnsRecord.enabled` | `manage_dns_record.yml` |
 
-#### Step 1: Hostname Route
-- Calls Cloudflare API to create/update tunnel hostname route
-- Maps public hostname → origin service
-- Stores tunnel_id and hostname in cloudflare_ids dictionary
-- Increments hostname route counter
+**CloudflareTask phase lifecycle:**
 
-#### Step 2: Access Application (if enabled)
-- Creates/updates Cloudflare Access Application
-- Uses hostname as application domain
-- Sets session duration
-- Stores access_app_id in cloudflare_ids dictionary
-- Patches HTTPRoute with app ID annotation
-
-#### Step 3: Access Policy
-- Parses allow rules (groups and emails)
-- Creates/updates policy attached to Access Application
-- Supports multiple groups and emails
-- Stores access_policy_id in cloudflare_ids dictionary
-- Patches HTTPRoute with policy ID annotation
-
-#### Step 4: Service Token (if enabled)
-- Creates Cloudflare service token for machine-to-machine auth
-- Creates Kubernetes Secret with `client_id` and `client_secret`
-- Secret named: `{httproute-name}-cfzt-service-token`
-- Stores service_token_id in cloudflare_ids dictionary
-- Patches HTTPRoute with token ID and secret name annotations
-
-#### Step 5: Update State (NEW)
-- Updates state ConfigMap with:
-  - Current annotation hash
-  - All Cloudflare resource IDs collected during reconciliation
-  - Last sync timestamp
-- Enables efficient change detection on next cycle
-
----
-
-### Task File: update_tenant_status.yml
-
-**Purpose**: Update CloudflareZeroTrustTenant status with reconciliation results
-
-**Location**: `ansible/roles/tenant_reconcile/tasks/update_tenant_status.yml`
-
-```mermaid
-flowchart TD
-    START([update_tenant_status.yml]) --> BUILD_COND[Build status conditions]
-    
-    BUILD_COND --> READY[Condition:<br/>type: Ready<br/>status: True<br/>reason: ReconcileSuccess]
-    
-    READY --> BUILD_SUM[Build status summary]
-    
-    BUILD_SUM --> SUM[Summary:<br/>- managedHTTPRoutes<br/>- hostnameRoutes<br/>- accessApplications<br/>- accessPolicies<br/>- serviceTokens]
-    
-    SUM --> UPDATE[kubernetes.core.k8s_status<br/>Update CloudflareZeroTrustTenant]
-    
-    UPDATE --> SET_STATUS[Set Status:<br/>- observedGeneration<br/>- lastSyncTime<br/>- conditions<br/>- summary]
-    
-    SET_STATUS --> LOG[Debug: Status update result]
-    
-    LOG --> END([Done])
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
 ```
-
-**Status Fields Updated**:
-
-```yaml
-status:
-  observedGeneration: 1
-  lastSyncTime: "2026-02-18T10:00:00Z"
-  conditions:
-    - type: Ready
-      status: "True"
-      lastTransitionTime: "2026-02-18T10:00:00Z"
-      reason: ReconcileSuccess
-      message: "Successfully reconciled 3 HTTPRoute(s)"
-  summary:
-    managedHTTPRoutes: 3
-    hostnameRoutes: 3
-    accessApplications: 2
-    accessPolicies: 2
-    serviceTokens: 1
+Pending → InProgress (claimed) → Completed (all operations ok)
+                               → Failed    (any operation threw)
 ```
 
 ---
 
-### Role 5: cloudflare_api
+### Role: `cloudflare_api`
 
-**Purpose**: Interact with Cloudflare APIs
+**Pod:** cloudflare_worker (via `include_role: … tasks_from:`)  
+**Entrypoint:** individual task files
 
-**Location**: `ansible/roles/cloudflare_api/tasks/`
+Library role. Each task file is an idempotent unit covering one class of Cloudflare API operation. All tasks return structured result facts consumed by `execute_task.yml`.
 
-This role contains multiple task files, each handling a specific Cloudflare API operation.
+**Task files:**
 
-#### Task File: manage_hostname_route.yml
+| Task | API interaction | Result fact |
+|---|---|---|
+| `lookup_zone_id.yml` | GET `/zones?name=` (2-label fallback 3-label) | `resolved_zone_id` |
+| `manage_hostname_route.yml` | GET + PUT `/tunnels/{id}/configurations` | `hostname_route_result` |
+| `manage_tunnel_cname.yml` | POST/PATCH `/zones/{id}/dns_records` | `tunnel_cname_result` |
+| `manage_dns_record.yml` | POST/PATCH `/zones/{id}/dns_records` (A record) | `dns_record_result` |
+| `manage_access_app.yml` | GET + POST/PUT `/accounts/{id}/access/apps` | `access_app_result` |
+| `manage_access_policy.yml` | POST/PUT `/accounts/{id}/access/apps/{id}/policies` | `access_policy_result` |
+| `manage_service_token.yml` | POST `/accounts/{id}/access/service_tokens` (create-only) | `service_token_result` |
+| `delete_resources.yml` | DELETE policies → app → token → tunnel rule → DNS record | — |
 
-```mermaid
-flowchart TD
-    START([manage_hostname_route.yml]) --> GET[ansible.builtin.uri<br/>GET tunnel configuration]
-    
-    GET --> PARSE[Parse existing config.ingress]
-    
-    PARSE --> BUILD[Build hostname ingress rule:<br/>hostname: cf_hostname<br/>service: cf_origin_service]
-    
-    BUILD --> REMOVE[Remove existing rule for hostname]
-    
-    REMOVE --> ADD[Add new hostname rule]
-    
-    ADD --> CATCHALL{Catch-all rule exists?}
-    CATCHALL -->|No| ADD_CATCHALL[Add: service: http_status:404]
-    CATCHALL -->|Yes| BUILD_CONFIG
-    
-    ADD_CATCHALL --> BUILD_CONFIG[Build complete tunnel config]
-    
-    BUILD_CONFIG --> PUT[ansible.builtin.uri<br/>PUT tunnel configuration]
-    
-    PUT --> RETRY{Success?}
-    RETRY -->|No, retry| PUT
-    RETRY -->|Yes| RESULT[Set hostname_route_result]
-    
-    RESULT --> LOG[Debug: Log result]
-    LOG --> END([Done])
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
-```
+**Idempotency strategy:**
 
-**API Call**:
-```
-PUT https://api.cloudflare.com/client/v4/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations
-```
-
-**Retry Logic**:
-- 3 retries
-- 5 second delay between retries
-- Handles rate limiting (429)
-
----
-
-#### Task File: manage_access_app.yml
-
-```mermaid
-flowchart TD
-    START([manage_access_app.yml]) --> SET_DUR[Set default session_duration]
-    
-    SET_DUR --> BUILD[Build Access App payload:<br/>- name<br/>- domain<br/>- type: self_hosted<br/>- session_duration<br/>- security settings]
-    
-    BUILD --> CHECK{cf_app_id defined?}
-    
-    CHECK -->|No, create| POST[ansible.builtin.uri<br/>POST create application]
-    CHECK -->|Yes, update| PUT[ansible.builtin.uri<br/>PUT update application]
-    
-    POST --> RETRY1{Success?}
-    PUT --> RETRY2{Success?}
-    
-    RETRY1 -->|No| POST
-    RETRY1 -->|Yes| SET_CREATE[Set access_app_result<br/>created: true<br/>app_id: from response]
-    
-    RETRY2 -->|No| PUT
-    RETRY2 -->|Yes| SET_UPDATE[Set access_app_result<br/>created: false<br/>app_id: cf_app_id]
-    
-    SET_CREATE --> LOG
-    SET_UPDATE --> LOG[Debug: Log result]
-    
-    LOG --> END([Done])
-    
-    style START fill:#4CAF50
-    style CHECK fill:#FF9800
-    style END fill:#2196F3
-```
-
-**API Calls**:
-- Create: `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps`
-- Update: `PUT https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps/{app_id}`
-
-**Idempotency**: Uses `cf_app_id` from annotations to update instead of create
-
----
-
-#### Task File: manage_access_policy.yml
-
-```mermaid
-flowchart TD
-    START([manage_access_policy.yml]) --> BUILD_GROUPS{cf_allow_groups defined?}
-    
-    BUILD_GROUPS -->|Yes| MAP_GROUPS[Build group rules:<br/>Each group → group object]
-    BUILD_GROUPS -->|No| BUILD_EMAILS
-    
-    MAP_GROUPS --> BUILD_EMAILS{cf_allow_emails defined?}
-    
-    BUILD_EMAILS -->|Yes| MAP_EMAILS[Build email rules:<br/>Each email → email object]
-    BUILD_EMAILS -->|No| COMBINE
-    
-    MAP_EMAILS --> COMBINE[Combine include rules]
-    
-    COMBINE --> CHECK_EMPTY{Rules empty?}
-    CHECK_EMPTY -->|Yes| DEFAULT[Set default: everyone]
-    CHECK_EMPTY -->|No| BUILD_PAYLOAD
-    
-    DEFAULT --> BUILD_PAYLOAD[Build Access Policy payload:<br/>- name<br/>- decision: allow<br/>- include: rules<br/>- precedence: 1]
-    
-    BUILD_PAYLOAD --> CHECK_ID{cf_policy_id defined?}
-    
-    CHECK_ID -->|No, create| POST[ansible.builtin.uri<br/>POST create policy]
-    CHECK_ID -->|Yes, update| PUT[ansible.builtin.uri<br/>PUT update policy]
-    
-    POST --> SET_CREATE[Set access_policy_result]
-    PUT --> SET_UPDATE[Set access_policy_result]
-    
-    SET_CREATE --> LOG
-    SET_UPDATE --> LOG[Debug: Log result]
-    
-    LOG --> END([Done])
-    
-    style START fill:#4CAF50
-    style CHECK_EMPTY fill:#FF9800
-    style CHECK_ID fill:#FF9800
-    style END fill:#2196F3
-```
-
-**Policy Structure**:
-```json
-{
-  "name": "myapp-allow-policy",
-  "decision": "allow",
-  "include": [
-    {"group": {"id": "Engineering"}},
-    {"group": {"id": "Admins"}},
-    {"email": {"email": "user@example.com"}}
-  ],
-  "precedence": 1
-}
-```
-
-**API Calls**:
-- Create: `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps/{app_id}/policies`
-- Update: `PUT https://api.cloudflare.com/client/v4/accounts/{account_id}/access/apps/{app_id}/policies/{policy_id}`
-
----
-
-#### Task File: manage_service_token.yml
-
-```mermaid
-flowchart TD
-    START([manage_service_token.yml]) --> CHECK{cf_token_id defined?}
-    
-    CHECK -->|No, create| POST[ansible.builtin.uri<br/>POST create service token]
-    CHECK -->|Yes, exists| SET_EXIST[Set service_token_result<br/>created: false]
-    
-    POST --> EXTRACT[Extract from response:<br/>- token_id<br/>- client_id<br/>- client_secret]
-    
-    EXTRACT --> SET_CREATE[Set service_token_result<br/>created: true<br/>+ credentials]
-    
-    SET_CREATE --> WARN[Debug: Warning about<br/>one-time credentials]
-    SET_EXIST --> LOG
-    
-    WARN --> LOG[Debug: Log result]
-    
-    LOG --> END([Done])
-    
-    style START fill:#4CAF50
-    style CHECK fill:#FF9800
-    style END fill:#2196F3
-```
-
-**API Call**:
-```
-POST https://api.cloudflare.com/client/v4/accounts/{account_id}/access/service_tokens
-```
-
-**Important**: Service token credentials (`client_id` and `client_secret`) are only returned once at creation time. The operator stores them in a Kubernetes Secret immediately.
-
----
-
-#### Task File: delete_resources.yml
-
-```mermaid
-flowchart TD
-    START([delete_resources.yml]) --> POL{delete_policy_ids defined?}
-    
-    POL -->|Yes| DEL_POL[Loop: DELETE each policy]
-    POL -->|No| APP
-    
-    DEL_POL --> APP{delete_app_id defined?}
-    
-    APP -->|Yes| DEL_APP[ansible.builtin.uri<br/>DELETE Access Application]
-    APP -->|No| TOKEN
-    
-    DEL_APP --> TOKEN{delete_token_id defined?}
-    
-    TOKEN -->|Yes| DEL_TOKEN[ansible.builtin.uri<br/>DELETE Service Token]
-    TOKEN -->|No| HOSTNAME
-    
-    DEL_TOKEN --> HOSTNAME{delete_hostname defined?}
-    
-    HOSTNAME -->|Yes| GET_TUNNEL[GET tunnel configuration]
-    
-    GET_TUNNEL --> REMOVE[Remove hostname from ingress]
-    REMOVE --> PUT_TUNNEL[PUT updated tunnel config]
-    
-    PUT_TUNNEL --> RESULT
-    HOSTNAME -->|No| RESULT[Set deletion_result]
-    
-    RESULT --> END([Done])
-    
-    style START fill:#4CAF50
-    style END fill:#2196F3
-```
-
-**Deletion Order** (important for dependencies):
-1. Access Policies (dependent on app)
-2. Access Application
-3. Service Token
-4. Hostname from tunnel configuration
-
-**Used when**: HTTPRoute is deleted or `cfzt.cloudflare.com/enabled` annotation is removed
-
----
+- Hostname route: GET full config, replace rule, PUT back
+- CNAME/A record: skip POST if existing ID matches; PATCH if content differs
+- Access app/policy: GET existing by hostname, PUT if found, POST if not
+- Service token: POST only if no existing `cf_existing_token_id`
+- All deletes: `status_code: [200, 204, 404]` — 404 = already gone
 
 ## Task-Level Flow
 

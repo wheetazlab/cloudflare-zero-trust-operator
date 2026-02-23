@@ -166,6 +166,19 @@
       ansible.builtin.debug:
         msg: "Reconciling HTTPRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
 
+    # Step 1a-pre: Auto-discover Cloudflare Zone ID from the hostname.
+    # Validates against tenant.zoneId if set (mismatch = fail).
+    # Sets resolved_zone_id; empty string if lookup failed (DNS skipped with warning).
+    - name: Auto-discover Zone ID for hostname
+      include_role:
+        name: cloudflare_api
+        tasks_from: lookup_zone_id.yml
+      vars:
+        cf_api_token: "{{ api_token }}"
+        cf_hostname: "{{ hostname }}"
+        cf_api_base: "{{ cloudflare_api_base }}"
+        cf_tenant_zone_id: "{{ tenant_zone_id | default('') }}"
+
     # Step 1: Create/Update Hostname Route (tunnel mode only)
     - name: Manage hostname route
       include_role:
@@ -201,7 +214,7 @@
 
     # Step 1b: Create/Update tunnel CNAME DNS record (tunnel mode only)
     # Creates:  <hostname>  CNAME  <tunnel-id>.cfargotunnel.com  proxied=true
-    # Skipped when tenant_zone_id is not set (backward compat — user manages DNS)
+    # Skipped when zone ID could not be resolved (user must manage DNS manually)
     - name: Manage tunnel CNAME DNS record
       block:
         - name: Create/Update CNAME for tunnel route
@@ -210,7 +223,7 @@
             tasks_from: manage_tunnel_cname.yml
           vars:
             cf_api_token: "{{ api_token }}"
-            cf_zone_id: "{{ tenant_zone_id }}"
+            cf_zone_id: "{{ resolved_zone_id }}"
             cf_hostname: "{{ hostname }}"
             cf_tunnel_id: "{{ tunnel_id }}"
             cf_api_base: "{{ cloudflare_api_base }}"
@@ -219,15 +232,15 @@
         - name: Store CNAME record ID
           ansible.builtin.set_fact:
             cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'cname_record_id': tunnel_cname_result.record_id}) }}"
-      when: not dns_only_mode and tenant_zone_id != ""
+      when: not dns_only_mode and resolved_zone_id != ""
 
-    - name: Warn that CNAME will not be created (no zoneId on tenant)
+    - name: Warn that CNAME will not be created (zone ID could not be resolved)
       ansible.builtin.debug:
         msg: >
-          WARNING: tenant '{{ tenant_name }}' has no zoneId set.
-          Tunnel ingress rule written but DNS CNAME for {{ hostname }} must be
-          created manually: {{ hostname }} CNAME {{ tunnel_id }}.cfargotunnel.com
-      when: not dns_only_mode and tenant_zone_id == ""
+          WARNING: Zone ID could not be resolved for hostname {{ hostname }}.
+          Tunnel ingress rule written but DNS CNAME must be created manually:
+          {{ hostname }} CNAME {{ tunnel_id }}.cfargotunnel.com
+      when: not dns_only_mode and resolved_zone_id == ""
 
     # Step 2: Create/Update Access Application (if enabled)
     - name: Manage Access Application
@@ -416,9 +429,10 @@
         - name: Validate zone ID is set for dns-only mode
           ansible.builtin.fail:
             msg: >-
-              tenant.zoneId must be set when using dnsOnly mode
+              Zone ID could not be resolved for hostname '{{ hostname }}' and
+              no tenant.zoneId is set — required for dnsOnly mode
               (template: {{ template_name }}, httproute: {{ ir_namespace }}/{{ ir_name }})
-          when: tenant_zone_id == ""
+          when: resolved_zone_id == ""
 
         # Option A: static IP from template
         - name: Use static IP from template
@@ -471,7 +485,7 @@
             tasks_from: manage_dns_record.yml
           vars:
             cf_api_token: "{{ api_token }}"
-            cf_zone_id: "{{ tenant_zone_id }}"
+            cf_zone_id: "{{ resolved_zone_id }}"
             cf_hostname: "{{ hostname }}"
             cf_ip_address: "{{ dns_target_ip }}"
             cf_api_base: "{{ cloudflare_api_base }}"

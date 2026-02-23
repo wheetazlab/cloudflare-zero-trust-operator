@@ -48,10 +48,11 @@ spec:
                 zoneId:
                   type: string
                   description: >
-                    Cloudflare Zone ID (32-char hex). Required for automatic DNS
-                    management: tunnel mode uses it to create CNAME records, dns-only
-                    mode uses it to create A records. If omitted, DNS records must be
-                    managed manually.
+                    Cloudflare Zone ID (32-char hex). Optional — the operator will
+                    auto-discover the zone ID for each hostname via the Cloudflare
+                    Zones API. If set, the discovered ID is validated against this
+                    value and the reconcile fails on a mismatch. Required for
+                    dns-only mode if Zone:Read is not available on the API token.
                   pattern: ^[a-f0-9]{32}$
                 credentialRef:
                   type: object

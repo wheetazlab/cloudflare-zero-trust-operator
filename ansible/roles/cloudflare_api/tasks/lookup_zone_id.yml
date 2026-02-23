@@ -1,0 +1,106 @@
+---
+# Auto-discover Cloudflare Zone ID from a hostname via the Zones API.
+#
+# Strategy: progressively try the last 2, then last 3, domain labels as the
+# apex zone name (handles both standard TLDs and ccSLDs like .co.uk).
+#
+# Input vars:
+#   cf_api_token       - Cloudflare API token (needs Zone:Read at minimum)
+#   cf_hostname        - Full hostname (e.g., myapp.example.com)
+#   cf_api_base        - Cloudflare API base URL
+#   cf_tenant_zone_id  - Optional: zone ID already set on the tenant (may be "")
+#                        If set, the discovered ID is validated against it.
+#                        A mismatch fails the reconcile.
+#
+# Output var (set on the caller):
+#   resolved_zone_id   - Discovered zone ID, or "" if lookup failed/API error.
+#                        Callers should treat "" as "skip DNS" (with warning).
+
+- name: Split hostname into labels
+  ansible.builtin.set_fact:
+    _zone_labels: "{{ cf_hostname.split('.') }}"
+
+- name: Build 2-label apex candidate
+  ansible.builtin.set_fact:
+    _zone_apex_2: "{{ _zone_labels[-2:] | join('.') }}"
+
+- name: Build 3-label apex candidate (for ccSLDs like example.co.uk)
+  ansible.builtin.set_fact:
+    _zone_apex_3: "{{ _zone_labels[-3:] | join('.') }}"
+  when: _zone_labels | length >= 3
+
+# --- 2-label lookup ---
+- name: Look up zone by 2-label apex
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones?name={{ _zone_apex_2 }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    return_content: true
+    status_code: [200]
+  register: _zone_lookup_2
+  failed_when: false
+
+- name: Extract zone ID from 2-label result
+  ansible.builtin.set_fact:
+    _discovered_zone_id: "{{ _zone_lookup_2.json.result[0].id }}"
+  when:
+    - _zone_lookup_2.status == 200
+    - _zone_lookup_2.json is defined
+    - _zone_lookup_2.json.result | default([]) | length > 0
+
+# --- 3-label lookup (ccSLD fallback) ---
+- name: Look up zone by 3-label apex (ccSLD fallback)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones?name={{ _zone_apex_3 }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    return_content: true
+    status_code: [200]
+  register: _zone_lookup_3
+  failed_when: false
+  when:
+    - _discovered_zone_id is not defined
+    - _zone_labels | length >= 3
+
+- name: Extract zone ID from 3-label result
+  ansible.builtin.set_fact:
+    _discovered_zone_id: "{{ _zone_lookup_3.json.result[0].id }}"
+  when:
+    - _discovered_zone_id is not defined
+    - _zone_lookup_3 is defined
+    - _zone_lookup_3.status == 200
+    - _zone_lookup_3.json is defined
+    - _zone_lookup_3.json.result | default([]) | length > 0
+
+# --- Validation against tenant.zoneId ---
+- name: Validate discovered zone ID matches tenant.zoneId
+  ansible.builtin.fail:
+    msg: >-
+      Zone ID mismatch for hostname '{{ cf_hostname }}':
+      tenant.zoneId is '{{ cf_tenant_zone_id }}' but the Cloudflare Zones API
+      returned '{{ _discovered_zone_id }}' for that hostname.
+      Ensure tenant.zoneId matches the zone that contains '{{ cf_hostname }}'.
+  when:
+    - cf_tenant_zone_id | default('') != ''
+    - _discovered_zone_id is defined
+    - _discovered_zone_id != cf_tenant_zone_id
+
+# --- Warn and fall back if lookup failed ---
+- name: Warn that zone lookup failed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Could not auto-discover Cloudflare Zone ID for hostname
+      '{{ cf_hostname }}' (tried '{{ _zone_apex_2 }}'
+      {{ "and '" + _zone_apex_3 + "'" if _zone_labels | length >= 3 else "" }}).
+      This may be a Zone:Read permission issue, or the domain is not in this
+      Cloudflare account. DNS management will be skipped for this HTTPRoute.
+  when: _discovered_zone_id is not defined
+
+# --- Export resolved ID (empty string when lookup failed / not found) ---
+- name: Set resolved_zone_id
+  ansible.builtin.set_fact:
+    resolved_zone_id: "{{ _discovered_zone_id | default('') }}"

@@ -386,26 +386,26 @@ sequenceDiagram
     participant K8s as Kubernetes
     participant Pod as Operator Pod
     participant Entry as entrypoint.sh
-    participant Loop as Reconciliation Loop
+    participant PollLoop as Reconciliation Loop
     participant Ansible as Ansible Playbook
     
     K8s->>Pod: Start Container
     Pod->>Entry: Execute entrypoint.sh
     Entry->>Entry: Set Environment Variables
     Entry->>Entry: Configure Ansible
-    Entry->>Loop: Start Infinite Loop
+    Entry->>PollLoop: Start Infinite Loop
     
     loop Every POLL_INTERVAL_SECONDS
-        Loop->>Ansible: ansible-playbook reconcile.yml
+        PollLoop->>Ansible: ansible-playbook reconcile.yml
         Ansible->>Ansible: List Tenants
         Ansible->>Ansible: List HTTPRoutes
         Ansible->>Ansible: Reconcile Each Tenant
-        Ansible-->>Loop: Return (success/failure)
-        Loop->>Loop: Log Result
-        Loop->>Loop: Sleep POLL_INTERVAL_SECONDS
+        Ansible-->>PollLoop: Return (success/failure)
+        PollLoop->>PollLoop: Log Result
+        PollLoop->>PollLoop: Sleep POLL_INTERVAL_SECONDS
     end
     
-    Note over Loop: Continues until SIGTERM/SIGINT
+    Note over PollLoop: Continues until SIGTERM/SIGINT
 ```
 
 ### Entrypoint Script Responsibilities
@@ -474,8 +474,8 @@ graph LR
         end
         
         subgraph "Volumes"
-            TMP[/tmp - emptyDir]
-            RUNNER[/runner - emptyDir]
+            TMP[tmp - emptyDir]
+            RUNNER[runner - emptyDir]
         end
     end
     
@@ -529,13 +529,13 @@ graph TB
         SA_CA[CA Certificate]
     end
     
-    CODE -.reads.-> SA_TOKEN
-    CODE -.reads.-> SA_CA
+    CODE -. reads .-> SA_TOKEN
+    CODE -. reads .-> SA_CA
     CODE -->|HTTPS + Token Auth| API
     API -->|List/Watch/Patch| RESOURCES[K8s Resources]
     
-    SA_TOKEN -.mounted at.-> TOKEN_PATH[/var/run/secrets/kubernetes.io/serviceaccount/token]
-    SA_CA -.mounted at.-> CA_PATH[/var/run/secrets/kubernetes.io/serviceaccount/ca.crt]
+    SA_TOKEN -. mounted at .-> TOKEN_PATH[serviceaccount/token]
+    SA_CA -. mounted at .-> CA_PATH[serviceaccount/ca.crt]
 ```
 
 **Authentication Method**:

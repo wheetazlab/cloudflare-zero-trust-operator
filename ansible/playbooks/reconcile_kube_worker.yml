@@ -1,0 +1,65 @@
+---
+# reconcile_kube_worker.yml
+# Entrypoint for the kube_worker pod.
+# Responsibilities:
+#   - Watch HTTPRoutes and CloudflareZeroTrustTenant CRs
+#   - Collect results from Completed CloudflareTask CRs and write back to HTTPRoutes
+#   - Create/update CloudflareTask CRs for HTTPRoutes that need Cloudflare reconciliation
+#   - Manage K8s Secrets for service token credentials
+#   - NO direct Cloudflare API calls
+
+- name: kube_worker — Kubernetes state manager
+  hosts: localhost
+  gather_facts: false
+  vars:
+    watch_namespaces: "{{ lookup('env', 'WATCH_NAMESPACES') | default('', true) }}"
+    cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
+    operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
+
+  tasks:
+    - name: Display kube_worker startup
+      ansible.builtin.debug:
+        msg:
+          - "=== kube_worker starting ==="
+          - "Watch Namespaces: {{ watch_namespaces if watch_namespaces else 'ALL' }}"
+          - "Operator Namespace: {{ operator_namespace }}"
+
+    # Phase 1: Collect results from Completed tasks and write back to HTTPRoutes
+    - name: Collect completed CloudflareTask results
+      include_role:
+        name: kube_worker
+        tasks_from: collect_results.yml
+      vars:
+        operator_namespace: "{{ operator_namespace }}"
+        watch_namespaces: "{{ watch_namespaces }}"
+
+    # Phase 2: Check operator config (self-management)
+    - name: Check and apply operator configuration
+      include_role:
+        name: operator_config
+      vars:
+        operator_namespace: "{{ operator_namespace }}"
+
+    # Phase 3: Discover all tenants
+    - name: Get all CloudflareZeroTrustTenant resources
+      include_role:
+        name: k8s_watch
+        tasks_from: list_tenants.yml
+
+    # Phase 4: Discover all HTTPRoutes
+    - name: Get all HTTPRoute resources
+      include_role:
+        name: k8s_watch
+        tasks_from: list_httproutes.yml
+
+    # Phase 5: For each tenant, reconcile its HTTPRoutes into CloudflareTask CRs
+    - name: Reconcile tenants
+      include_role:
+        name: kube_worker
+        tasks_from: reconcile_tenant.yml
+      vars:
+        tenant: "{{ item }}"
+        cloudflare_api_base: "{{ cloudflare_api_base }}"
+        operator_namespace: "{{ operator_namespace }}"
+      loop: "{{ cfzt_tenants }}"
+      when: cfzt_tenants is defined and cfzt_tenants | length > 0

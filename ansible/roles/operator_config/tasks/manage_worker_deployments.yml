@@ -1,0 +1,150 @@
+---
+# operator_config/tasks/manage_worker_deployments.yml
+# Creates or updates the kube_worker and cloudflare_worker Deployments.
+# Called by operator_config/tasks/main.yml when running as manager.
+#
+# Strategy: read the manager Deployment's own spec (image, serviceAccount,
+# security contexts, nodeSelector, tolerations) and project it onto child
+# Deployments with ROLE overrides.  This guarantees the three tiers always
+# run the same image without requiring separate image values.
+#
+# Variables:
+#   - operator_namespace
+#   - operator_config (optional – OperatorConfig CR)
+
+- name: "Worker Deployments | Get manager Deployment to read image/spec"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: cloudflare-zero-trust-operator
+    namespace: "{{ operator_namespace }}"
+  register: manager_deployment_info
+
+- name: "Worker Deployments | Skip if manager Deployment not found"
+  ansible.builtin.debug:
+    msg: "Manager Deployment not found – skipping worker deployment management"
+  when: manager_deployment_info.resources | length == 0
+
+- name: "Worker Deployments | Create/Update child Deployments"
+  when: manager_deployment_info.resources | length > 0
+  block:
+    - name: "Worker Deployments | Extract manager spec"
+      ansible.builtin.set_fact:
+        mgr_container: "{{ manager_deployment_info.resources[0].spec.template.spec.containers[0] }}"
+        mgr_pod_spec: "{{ manager_deployment_info.resources[0].spec.template.spec }}"
+        mgr_replicas: "{{ manager_deployment_info.resources[0].spec.replicas }}"
+        mgr_labels: "{{ manager_deployment_info.resources[0].spec.template.metadata.labels }}"
+
+    - name: "Worker Deployments | Build base env list (shared between workers)"
+      ansible.builtin.set_fact:
+        worker_base_env: >-
+          {{
+            mgr_container.env
+            | rejectattr('name', 'equalto', 'ROLE')
+            | list
+          }}
+
+    - name: "Worker Deployments | Ensure kube_worker Deployment exists"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: cloudflare-zero-trust-kube-worker
+            namespace: "{{ operator_namespace }}"
+            labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'kube-worker'}) }}"
+            ownerReferences:
+              - apiVersion: apps/v1
+                kind: Deployment
+                name: cloudflare-zero-trust-operator
+                uid: "{{ manager_deployment_info.resources[0].metadata.uid }}"
+                blockOwnerDeletion: true
+                controller: true
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: cloudflare-zero-trust-operator
+                app.kubernetes.io/component: kube-worker
+            template:
+              metadata:
+                labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'kube-worker'}) }}"
+              spec:
+                serviceAccountName: "{{ mgr_pod_spec.serviceAccountName }}"
+                securityContext: "{{ mgr_pod_spec.securityContext | default({}) }}"
+                nodeSelector: "{{ mgr_pod_spec.nodeSelector | default({}) }}"
+                tolerations: "{{ mgr_pod_spec.tolerations | default([]) }}"
+                affinity: "{{ mgr_pod_spec.affinity | default({}) }}"
+                containers:
+                  - name: kube-worker
+                    image: "{{ mgr_container.image }}"
+                    imagePullPolicy: "{{ mgr_container.imagePullPolicy | default('Always') }}"
+                    securityContext: "{{ mgr_container.securityContext | default({}) }}"
+                    env: >-
+                      {{
+                        worker_base_env
+                        | rejectattr('name', 'equalto', 'POD_NAME')
+                        | list
+                        + [{'name': 'ROLE', 'value': 'kube_worker'},
+                           {'name': 'POD_NAME', 'valueFrom': {'fieldRef': {'fieldPath': 'metadata.name'}}}]
+                      }}
+                    resources: "{{ mgr_container.resources | default({}) }}"
+                    volumeMounts: "{{ mgr_container.volumeMounts | default([]) }}"
+                volumes: "{{ mgr_pod_spec.volumes | default([]) }}"
+
+    - name: "Worker Deployments | Ensure cloudflare_worker Deployment exists"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: cloudflare-zero-trust-cloudflare-worker
+            namespace: "{{ operator_namespace }}"
+            labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'cloudflare-worker'}) }}"
+            ownerReferences:
+              - apiVersion: apps/v1
+                kind: Deployment
+                name: cloudflare-zero-trust-operator
+                uid: "{{ manager_deployment_info.resources[0].metadata.uid }}"
+                blockOwnerDeletion: true
+                controller: true
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: cloudflare-zero-trust-operator
+                app.kubernetes.io/component: cloudflare-worker
+            template:
+              metadata:
+                labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'cloudflare-worker'}) }}"
+              spec:
+                serviceAccountName: "{{ mgr_pod_spec.serviceAccountName }}"
+                securityContext: "{{ mgr_pod_spec.securityContext | default({}) }}"
+                nodeSelector: "{{ mgr_pod_spec.nodeSelector | default({}) }}"
+                tolerations: "{{ mgr_pod_spec.tolerations | default([]) }}"
+                affinity: "{{ mgr_pod_spec.affinity | default({}) }}"
+                containers:
+                  - name: cloudflare-worker
+                    image: "{{ mgr_container.image }}"
+                    imagePullPolicy: "{{ mgr_container.imagePullPolicy | default('Always') }}"
+                    securityContext: "{{ mgr_container.securityContext | default({}) }}"
+                    env: >-
+                      {{
+                        worker_base_env
+                        | rejectattr('name', 'equalto', 'POD_NAME')
+                        | list
+                        + [{'name': 'ROLE', 'value': 'cloudflare_worker'},
+                           {'name': 'POD_NAME', 'valueFrom': {'fieldRef': {'fieldPath': 'metadata.name'}}}]
+                      }}
+                    resources: "{{ mgr_container.resources | default({}) }}"
+                    volumeMounts: "{{ mgr_container.volumeMounts | default([]) }}"
+                volumes: "{{ mgr_pod_spec.volumes | default([]) }}"
+
+    - name: "Worker Deployments | Workers created/updated"
+      ansible.builtin.debug:
+        msg:
+          - "kube_worker Deployment: cloudflare-zero-trust-kube-worker"
+          - "cloudflare_worker Deployment: cloudflare-zero-trust-cloudflare-worker"
+          - "Image: {{ mgr_container.image }}"

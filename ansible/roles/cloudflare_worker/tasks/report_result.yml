@@ -1,0 +1,37 @@
+---
+# cloudflare_worker — report_result.yml
+# Patches the CloudflareTask status to Completed and populates status.result
+# with all Cloudflare resource IDs produced during execute_task.yml.
+#
+# Variables (provided by execute_task.yml / parent scope):
+#   - ct_name
+#   - cf_results: dict of collected result IDs
+#   - operator_namespace / worker_pod_name
+
+- name: Patch CloudflareTask status to Completed
+  kubernetes.core.k8s:
+    state: patched
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareTask
+    name: "{{ ct_name }}"
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+    definition:
+      status:
+        phase: Completed
+        message: "All Cloudflare operations succeeded"
+        workerPod: "{{ worker_pod_name }}"
+        result:
+          tunnelRouteId: "{{ cf_results.tunnelRouteId | default('') }}"
+          cnameRecordId: "{{ cf_results.cnameRecordId | default('') }}"
+          accessAppId: "{{ cf_results.accessAppId | default('') }}"
+          accessPolicyIds: "{{ cf_results.accessPolicyIds | default('') }}"
+          serviceTokenId: "{{ cf_results.serviceTokenId | default('') }}"
+          serviceTokenCreated: "{{ cf_results.serviceTokenCreated | default(false) }}"
+          serviceTokenClientId: "{{ cf_results.serviceTokenClientId | default('') }}"
+          serviceTokenClientSecret: "{{ cf_results.serviceTokenClientSecret | default('') }}"
+          dnsRecordId: "{{ cf_results.dnsRecordId | default('') }}"
+          dnsRecordIp: "{{ cf_results.dnsRecordIp | default('') }}"
+
+- name: Log task completion
+  ansible.builtin.debug:
+    msg: "cloudflare_worker: task {{ ct_name }} completed — results: {{ cf_results }}"

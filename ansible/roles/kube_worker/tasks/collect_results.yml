@@ -1,0 +1,59 @@
+---
+# kube_worker — collect_results.yml
+# Runs at the START of each reconcile cycle.
+# Reads completed/failed CloudflareTask CRs, writes results back to HTTPRoutes,
+# updates the state ConfigMap, optionally creates K8s Secrets, then deletes the task.
+#
+# Variables:
+#   - operator_namespace: Namespace where operator (and tasks) live
+#   - watch_namespaces: Comma-separated list of watched namespaces (or empty for all)
+
+- name: List Completed CloudflareTask CRs
+  kubernetes.core.k8s_info:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareTask
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+    label_selectors: []
+  register: all_tasks
+
+- name: Filter Completed tasks
+  ansible.builtin.set_fact:
+    completed_tasks: >-
+      {{
+        all_tasks.resources
+        | selectattr('status.phase', 'defined')
+        | selectattr('status.phase', 'equalto', 'Completed')
+        | list
+      }}
+    failed_tasks: >-
+      {{
+        all_tasks.resources
+        | selectattr('status.phase', 'defined')
+        | selectattr('status.phase', 'equalto', 'Failed')
+        | list
+      }}
+
+- name: Log completed task count
+  ansible.builtin.debug:
+    msg: "Found {{ completed_tasks | length }} Completed and {{ failed_tasks | length }} Failed CloudflareTask(s)"
+
+# ─── Process Completed tasks ──────────────────────────────────────────────────
+
+- name: Process each Completed CloudflareTask
+  include_tasks: process_completed_task.yml
+  loop: "{{ completed_tasks }}"
+  loop_control:
+    loop_var: cfzt_task
+    label: "{{ cfzt_task.metadata.name }}"
+
+# ─── Surface Failed tasks as warnings ─────────────────────────────────────────
+
+- name: Warn about Failed CloudflareTask CRs
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: CloudflareTask {{ item.metadata.name }} FAILED —
+      HTTPRoute {{ item.spec.httprouteRef.namespace }}/{{ item.spec.httprouteRef.name }}:
+      {{ item.status.message | default('no message') }}
+  loop: "{{ failed_tasks }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"

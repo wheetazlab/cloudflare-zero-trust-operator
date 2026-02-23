@@ -32,39 +32,54 @@
     watch_namespaces: "{{ lookup('env', 'WATCH_NAMESPACES') | default('', true) }}"
     cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
     operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
-    
+    # ROLE selects the operating mode.
+    # manager  – manages worker Deployments only; no direct reconciliation
+    # (empty)  – legacy monolith: full reconciliation in a single pod
+    role: "{{ lookup('env', 'ROLE') | default('', true) }}"
+
   tasks:
-    - name: Check and apply operator configuration
+    - name: Check and apply operator configuration (manages worker Deployments in manager mode)
       include_role:
         name: operator_config
       vars:
         operator_namespace: "{{ operator_namespace }}"
 
-    - name: Get all CloudflareZeroTrustTenant resources
-      include_role:
-        name: k8s_watch
-        tasks_from: list_tenants.yml
+    # ── Monolith mode: run when ROLE is unset or explicitly "legacy" ───────────
+    - name: Monolith / legacy reconciliation (skipped when ROLE=manager)
+      when: role not in ['manager']
+      block:
+        - name: Get all CloudflareZeroTrustTenant resources
+          include_role:
+            name: k8s_watch
+            tasks_from: list_tenants.yml
 
-    - name: Get all HTTPRoute resources
-      include_role:
-        name: k8s_watch
-        tasks_from: list_httproutes.yml
-      vars:
-        namespaces: "{{ watch_namespaces.split(',') if watch_namespaces else [] }}"
+        - name: Get all HTTPRoute resources
+          include_role:
+            name: k8s_watch
+            tasks_from: list_httproutes.yml
+          vars:
+            namespaces: "{{ watch_namespaces.split(',') if watch_namespaces else [] }}"
 
-    - name: Reconcile each tenant
-      include_role:
-        name: tenant_reconcile
-      loop: "{{ cfzt_tenants | default([]) }}"
-      loop_control:
-        loop_var: tenant
-        label: "{{ tenant.metadata.namespace }}/{{ tenant.metadata.name }}"
-      when: cfzt_tenants is defined and cfzt_tenants | length > 0
+        - name: Reconcile each tenant
+          include_role:
+            name: tenant_reconcile
+          loop: "{{ cfzt_tenants | default([]) }}"
+          loop_control:
+            loop_var: tenant
+            label: "{{ tenant.metadata.namespace }}/{{ tenant.metadata.name }}"
+          when: cfzt_tenants is defined and cfzt_tenants | length > 0
 
-    - name: Cleanup orphaned state ConfigMaps
-      include_role:
-        name: state_manager
-        tasks_from: cleanup_orphaned.yml
-      vars:
-        cfzt_httproutes: "{{ cfzt_httproutes | default([]) }}"
-        operator_namespace: "{{ operator_namespace }}"
+        - name: Cleanup orphaned state ConfigMaps
+          include_role:
+            name: state_manager
+            tasks_from: cleanup_orphaned.yml
+          vars:
+            cfzt_httproutes: "{{ cfzt_httproutes | default([]) }}"
+            operator_namespace: "{{ operator_namespace }}"
+
+    - name: Manager mode – worker Deployments managed via operator_config above
+      ansible.builtin.debug:
+        msg:
+          - "Running as manager – kube_worker and cloudflare_worker handle reconciliation"
+          - "Worker Deployments are created/updated by operator_config role"
+      when: role == 'manager'

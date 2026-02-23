@@ -1,0 +1,226 @@
+---
+# cloudflare_worker — execute_task.yml
+# Executes all Cloudflare API operations defined in cfzt_task.spec.operations.
+# Maps directly to the Cloudflare API calls that were previously in
+# tenant_reconcile/tasks/reconcile_httproute.yml (Steps 1-4 / dns-only block).
+#
+# Variables (provided by claim_and_execute.yml / parent scope):
+#   - cfzt_task: The full CloudflareTask resource
+#   - ct_name / ct_hostname / ct_route_name / ct_route_namespace
+#   - cloudflare_api_base
+#   - operator_namespace / worker_pod_name
+
+# ─── Fetch API token from the credential secret ───────────────────────────────
+
+- name: Get Cloudflare API token from credential secret
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ cfzt_task.spec.credentialSecretRef.name }}"
+    namespace: "{{ cfzt_task.spec.credentialSecretRef.namespace }}"
+  register: cred_secret
+
+- name: Fail if credential secret missing
+  ansible.builtin.fail:
+    msg: >-
+      Credential secret
+      {{ cfzt_task.spec.credentialSecretRef.namespace }}/{{ cfzt_task.spec.credentialSecretRef.name }}
+      not found
+  when: cred_secret.resources | length == 0
+
+- name: Extract API token
+  ansible.builtin.set_fact:
+    cf_api_token: >-
+      {{
+        cred_secret.resources[0].data[cfzt_task.spec.credentialSecretRef.key | default('token')]
+        | b64decode
+      }}
+
+# ─── Convenience aliases for task spec fields ─────────────────────────────────
+
+- name: Set task-spec convenience facts
+  ansible.builtin.set_fact:
+    cf_hostname: "{{ cfzt_task.spec.hostname }}"
+    cf_account_id: "{{ cfzt_task.spec.accountId }}"
+    cf_tunnel_id: "{{ cfzt_task.spec.tunnelId }}"
+    cf_zone_id: "{{ cfzt_task.spec.zoneId | default('') }}"
+    cf_ops: "{{ cfzt_task.spec.operations }}"
+    cf_existing: "{{ cfzt_task.spec.existingIds | default({}) }}"
+    cf_results: {}
+
+# ─── Operation: Tunnel Route ──────────────────────────────────────────────────
+
+- name: Manage hostname tunnel route
+  include_role:
+    name: cloudflare_api
+    tasks_from: manage_hostname_route.yml
+  vars:
+    cf_api_token: "{{ cf_api_token }}"
+    cf_account_id: "{{ cf_account_id }}"
+    cf_tunnel_id: "{{ cf_tunnel_id }}"
+    cf_hostname: "{{ cf_hostname }}"
+    cf_origin_service: "{{ cf_ops.tunnelRoute.originService }}"
+    cf_api_base: "{{ cloudflare_api_base }}"
+    cf_origin_uses_https: "{{ cf_ops.tunnelRoute.originService | default('') is match('^https://') }}"
+    cf_http_redirect: "{{ cf_ops.tunnelRoute.httpRedirect | default(true) }}"
+    cf_no_tls_verify: "{{ cf_ops.tunnelRoute.originTLS.noTLSVerify | default(false) }}"
+    cf_origin_server_name: "{{ cf_ops.tunnelRoute.originTLS.originServerName | default('') }}"
+    cf_ca_pool: "{{ cf_ops.tunnelRoute.originTLS.caPool | default('') }}"
+    cf_tls_timeout: "{{ cf_ops.tunnelRoute.originTLS.tlsTimeout | default(10) | int }}"
+    cf_http2_origin: "{{ cf_ops.tunnelRoute.originTLS.http2Origin | default(false) }}"
+    cf_match_sni_to_host: "{{ cf_ops.tunnelRoute.originTLS.matchSNIToHost | default(false) }}"
+  when: cf_ops.tunnelRoute.enabled | default(false) | bool
+
+- name: Record tunnel route result
+  ansible.builtin.set_fact:
+    cf_results: "{{ cf_results | combine({'tunnelRouteId': cf_tunnel_id}) }}"
+  when: cf_ops.tunnelRoute.enabled | default(false) | bool
+
+# ─── Operation: CNAME DNS record ─────────────────────────────────────────────
+
+- name: Manage tunnel CNAME DNS record
+  include_role:
+    name: cloudflare_api
+    tasks_from: manage_tunnel_cname.yml
+  vars:
+    cf_api_token: "{{ cf_api_token }}"
+    cf_zone_id: "{{ cf_zone_id }}"
+    cf_hostname: "{{ cf_hostname }}"
+    cf_tunnel_id: "{{ cf_tunnel_id }}"
+    cf_api_base: "{{ cloudflare_api_base }}"
+    cf_existing_cname_id: "{{ cf_existing.cnameRecordId | default('') }}"
+  when: cf_ops.cnameDns.enabled | default(false) | bool and cf_zone_id | length > 0
+
+- name: Record CNAME result
+  ansible.builtin.set_fact:
+    cf_results: "{{ cf_results | combine({'cnameRecordId': tunnel_cname_result.record_id}) }}"
+  when: cf_ops.cnameDns.enabled | default(false) | bool and cf_zone_id | length > 0
+
+# ─── Operation: Access Application ───────────────────────────────────────────
+
+- name: Create/Update Access Application
+  include_role:
+    name: cloudflare_api
+    tasks_from: manage_access_app.yml
+  vars:
+    cf_api_token: "{{ cf_api_token }}"
+    cf_account_id: "{{ cf_account_id }}"
+    cf_app_name: "{{ ct_route_name }}"
+    cf_app_domain: "{{ cf_hostname }}"
+    cf_app_id: "{{ cf_existing.appId | default('') }}"
+    cf_session_duration: "{{ cf_ops.accessApp.sessionDuration | default('24h') }}"
+    cf_api_base: "{{ cloudflare_api_base }}"
+    cf_auto_redirect_to_identity: "{{ cf_ops.accessApp.autoRedirectToIdentity | default(false) }}"
+    cf_enable_binding_cookie: "{{ cf_ops.accessApp.enableBindingCookie | default(false) }}"
+    cf_http_only_cookie_attribute: "{{ cf_ops.accessApp.httpOnlyCookieAttribute | default(true) }}"
+    cf_same_site_cookie_attribute: "{{ cf_ops.accessApp.sameSiteCookieAttribute | default('lax') }}"
+    cf_logo_url: "{{ cf_ops.accessApp.logoUrl | default('') }}"
+    cf_skip_interstitial: "{{ cf_ops.accessApp.skipInterstitial | default(false) }}"
+    cf_app_launcher_visible: "{{ cf_ops.accessApp.appLauncherVisible | default(true) }}"
+    cf_service_auth_401_redirect: "{{ cf_ops.accessApp.serviceAuth401Redirect | default(false) }}"
+    cf_custom_deny_message: "{{ cf_ops.accessApp.customDenyMessage | default('') }}"
+    cf_custom_deny_url: "{{ cf_ops.accessApp.customDenyUrl | default('') }}"
+    cf_custom_non_identity_deny_url: "{{ cf_ops.accessApp.customNonIdentityDenyUrl | default('') }}"
+  when: cf_ops.accessApp.enabled | default(false) | bool
+
+- name: Record Access App result
+  ansible.builtin.set_fact:
+    cf_results: "{{ cf_results | combine({'accessAppId': access_app_result.app_id}) }}"
+  when: cf_ops.accessApp.enabled | default(false) | bool
+
+# ─── Operation: Access Policy (uses existing or creates new) ─────────────────
+
+- name: Handle Access Policy (existing)
+  ansible.builtin.set_fact:
+    cf_results: >-
+      {{
+        cf_results | combine({
+          'accessPolicyIds': cf_ops.accessApp.existingPolicyIds | default('')
+        })
+      }}
+  when:
+    - cf_ops.accessApp.enabled | default(false) | bool
+    - cf_ops.accessApp.existingPolicyIds | default('') | length > 0
+
+- name: Create/Update Access Policy (new)
+  block:
+    - name: Parse allow groups
+      ansible.builtin.set_fact:
+        access_allow_groups: "{{ (cf_ops.accessApp.allowGroups | default('')).split(',') | map('trim') | select | list }}"
+        access_allow_emails: "{{ (cf_ops.accessApp.allowEmails | default('')).split(',') | map('trim') | select | list }}"
+
+    - name: Create/Update Access Policy
+      include_role:
+        name: cloudflare_api
+        tasks_from: manage_access_policy.yml
+      vars:
+        cf_api_token: "{{ cf_api_token }}"
+        cf_account_id: "{{ cf_account_id }}"
+        cf_app_id: "{{ access_app_result.app_id }}"
+        cf_policy_name: "{{ ct_route_name }}-allow-policy"
+        cf_allow_groups: "{{ access_allow_groups }}"
+        cf_allow_emails: "{{ access_allow_emails }}"
+        cf_policy_id: ""
+        cf_api_base: "{{ cloudflare_api_base }}"
+
+    - name: Record Access Policy result
+      ansible.builtin.set_fact:
+        cf_results: "{{ cf_results | combine({'accessPolicyIds': access_policy_result.policy_id}) }}"
+  when:
+    - cf_ops.accessApp.enabled | default(false) | bool
+    - cf_ops.accessApp.existingPolicyIds | default('') | length == 0
+
+# ─── Operation: Service Token ─────────────────────────────────────────────────
+
+- name: Create/Update Service Token
+  include_role:
+    name: cloudflare_api
+    tasks_from: manage_service_token.yml
+  vars:
+    cf_api_token: "{{ cf_api_token }}"
+    cf_account_id: "{{ cf_account_id }}"
+    cf_token_name: "{{ ct_route_name }}-service-token"
+    cf_token_id: "{{ cf_existing.serviceTokenId | default('') }}"
+    cf_api_base: "{{ cloudflare_api_base }}"
+  when: cf_ops.serviceToken.enabled | default(false) | bool
+
+- name: Record Service Token result
+  ansible.builtin.set_fact:
+    cf_results: >-
+      {{
+        cf_results | combine({
+          'serviceTokenId': service_token_result.token_id,
+          'serviceTokenCreated': service_token_result.created,
+          'serviceTokenClientId': service_token_result.client_id | default(''),
+          'serviceTokenClientSecret': service_token_result.client_secret | default('')
+        })
+      }}
+  when: cf_ops.serviceToken.enabled | default(false) | bool
+
+# ─── Operation: DNS A record (dns-only mode) ──────────────────────────────────
+
+- name: Create/Update DNS A record
+  include_role:
+    name: cloudflare_api
+    tasks_from: manage_dns_record.yml
+  vars:
+    cf_api_token: "{{ cf_api_token }}"
+    cf_zone_id: "{{ cf_zone_id }}"
+    cf_hostname: "{{ cf_hostname }}"
+    cf_ip_address: "{{ cf_ops.dnsRecord.ipAddress }}"
+    cf_api_base: "{{ cloudflare_api_base }}"
+    cf_proxied: "{{ cf_ops.dnsRecord.proxied | default(false) }}"
+    cf_ttl: "{{ cf_ops.dnsRecord.ttl | default(120) }}"
+    cf_existing_record_id: "{{ cf_existing.dnsRecordId | default('') }}"
+  when: cf_ops.dnsRecord.enabled | default(false) | bool
+
+- name: Record DNS result
+  ansible.builtin.set_fact:
+    cf_results: >-
+      {{
+        cf_results | combine({
+          'dnsRecordId': dns_record_result.record_id,
+          'dnsRecordIp': dns_record_result.ip_address
+        })
+      }}
+  when: cf_ops.dnsRecord.enabled | default(false) | bool

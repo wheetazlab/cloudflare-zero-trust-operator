@@ -1,0 +1,106 @@
+---
+# kube_worker — process_completed_task.yml
+# Handles a single Completed CloudflareTask:
+#   1. Extracts result IDs from task.status.result
+#   2. Patches HTTPRoute annotations with Cloudflare resource IDs
+#   3. Creates K8s Secret for service token credentials (if task produced one)
+#   4. Updates state_manager ConfigMap
+#   5. Deletes the CloudflareTask CR
+#
+# Variables (via include_tasks loop):
+#   - cfzt_task: The CloudflareTask resource
+
+- name: Extract result data from task
+  ansible.builtin.set_fact:
+    ct_name: "{{ cfzt_task.metadata.name }}"
+    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name }}"
+    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace }}"
+    ct_route_uid: "{{ cfzt_task.spec.httprouteRef.uid }}"
+    ct_result: "{{ cfzt_task.status.result | default({}) }}"
+    ct_annotation_hash: "{{ cfzt_task.metadata.annotations['cfzt.cloudflare.com/annotation-hash'] | default('') }}"
+    ct_service_token_created: "{{ cfzt_task.status.result.serviceTokenCreated | default(false) }}"
+    ct_service_token_client_id: "{{ cfzt_task.status.result.serviceTokenClientId | default('') }}"
+    ct_service_token_client_secret: "{{ cfzt_task.status.result.serviceTokenClientSecret | default('') }}"
+
+- name: Log result processing
+  ansible.builtin.debug:
+    msg: "Processing Completed task {{ ct_name }} for HTTPRoute {{ ct_route_namespace }}/{{ ct_route_name }}"
+
+# ─── Patch HTTPRoute annotations ──────────────────────────────────────────────
+
+- name: Build annotation patch for tunnel mode results
+  ansible.builtin.set_fact:
+    route_annotation_patch: >-
+      {{
+        {
+          'cfzt.cloudflare.com/hostnameRouteId':  ct_result.tunnelRouteId  | default(''),
+          'cfzt.cloudflare.com/cnameRecordId':    ct_result.cnameRecordId  | default(''),
+          'cfzt.cloudflare.com/lastReconcile':    ansible_date_time.iso8601
+        }
+        | combine({'cfzt.cloudflare.com/accessAppId':    ct_result.accessAppId    | default('')} if ct_result.accessAppId    is defined else {})
+        | combine({'cfzt.cloudflare.com/accessPolicyIds': ct_result.accessPolicyIds | default('')} if ct_result.accessPolicyIds is defined else {})
+        | combine({'cfzt.cloudflare.com/serviceTokenId':  ct_result.serviceTokenId  | default('')} if ct_result.serviceTokenId  is defined else {})
+        | combine({'cfzt.cloudflare.com/serviceTokenSecretName': ct_route_name + '-cfzt-service-token'} if ct_service_token_created | bool else {})
+        | combine({'cfzt.cloudflare.com/dnsRecordId':     ct_result.dnsRecordId     | default('')} if ct_result.dnsRecordId    is defined else {})
+        | combine({'cfzt.cloudflare.com/dnsRecordIp':     ct_result.dnsRecordIp     | default('')} if ct_result.dnsRecordIp    is defined else {})
+      }}
+
+- name: Patch HTTPRoute annotations with results
+  kubernetes.core.k8s:
+    state: patched
+    kind: HTTPRoute
+    api_version: gateway.networking.k8s.io/v1
+    name: "{{ ct_route_name }}"
+    namespace: "{{ ct_route_namespace }}"
+    definition:
+      metadata:
+        annotations: "{{ route_annotation_patch }}"
+
+# ─── Create K8s Secret for service token (only if newly created by CF) ────────
+
+- name: Create Kubernetes Secret for Service Token
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ ct_route_name }}-cfzt-service-token"
+        namespace: "{{ ct_route_namespace }}"
+      type: Opaque
+      stringData:
+        client_id: "{{ ct_service_token_client_id }}"
+        client_secret: "{{ ct_service_token_client_secret }}"
+  when:
+    - ct_service_token_created | bool
+    - ct_service_token_client_id | length > 0
+    - ct_service_token_client_secret | length > 0
+
+# ─── Update state_manager ConfigMap ──────────────────────────────────────────
+
+- name: Update HTTPRoute state
+  include_role:
+    name: state_manager
+    tasks_from: update_state.yml
+  vars:
+    state_configmap_name: "cfzt-{{ ct_route_namespace }}-{{ ct_route_name }}"
+    ir_name: "{{ ct_route_name }}"
+    ir_namespace: "{{ ct_route_namespace }}"
+    ir_uid: "{{ ct_route_uid }}"
+    current_annotation_hash: "{{ ct_annotation_hash }}"
+    cloudflare_ids: "{{ ct_result }}"
+    operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+
+# ─── Delete the CloudflareTask CR ─────────────────────────────────────────────
+
+- name: Delete Completed CloudflareTask CR
+  kubernetes.core.k8s:
+    state: absent
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareTask
+    name: "{{ ct_name }}"
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+
+- name: Log task deletion
+  ansible.builtin.debug:
+    msg: "CloudflareTask {{ ct_name }} processed and deleted"

@@ -19,11 +19,27 @@ rules:
       - cloudflarezerotrusttenants/status
       - cloudflarezerotrustoperatorconfigs/status
     verbs: ["get", "patch", "update"]
-  # Self-update – locked to the operator Deployment only
+  # CloudflareTask CRD – communication bus between kube_worker and cloudflare_worker
+  - apiGroups: ["cfzt.cloudflare.com"]
+    resources:
+      - cloudflaretasks
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cfzt.cloudflare.com"]
+    resources:
+      - cloudflaretasks/status
+    verbs: ["get", "patch", "update"]
+  # Self-update + worker Deployment management
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: [{{ include "cloudflare-zero-trust-operator.fullname" . | quote }}]
+    resourceNames:
+      - {{ include "cloudflare-zero-trust-operator.fullname" . | quote }}
+      - {{ printf "%s-kube-worker" (include "cloudflare-zero-trust-operator.fullname" .) | quote }}
+      - {{ printf "%s-cloudflare-worker" (include "cloudflare-zero-trust-operator.fullname" .) | quote }}
     verbs: ["get", "list", "patch", "update"]
+  # The manager needs to create (not just patch) worker Deployments on first boot
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create"]
   # Gateway API – watches HTTPRoutes to build tunnel routing
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]

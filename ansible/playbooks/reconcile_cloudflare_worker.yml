@@ -1,0 +1,34 @@
+---
+# reconcile_cloudflare_worker.yml
+# Entrypoint for the cloudflare_worker pod.
+# Responsibilities:
+#   - Poll for Pending CloudflareTask CRs
+#   - Claim tasks (patch to InProgress)
+#   - Execute all Cloudflare API operations
+#   - Report results back to the CloudflareTask status
+#   - NO direct Kubernetes state writes (handled by kube_worker reading results)
+
+- name: cloudflare_worker — Cloudflare API executor
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cloudflare_api_base: "{{ lookup('env', 'CLOUDFLARE_API_BASE') | default('https://api.cloudflare.com/client/v4', true) }}"
+    operator_namespace: "{{ lookup('env', 'OPERATOR_NAMESPACE') | default('cloudflare-zero-trust', true) }}"
+    worker_pod_name: "{{ lookup('env', 'POD_NAME') | default('cloudflare-worker', true) }}"
+
+  tasks:
+    - name: Display cloudflare_worker startup
+      ansible.builtin.debug:
+        msg:
+          - "=== cloudflare_worker starting ==="
+          - "Operator Namespace: {{ operator_namespace }}"
+          - "Worker Pod: {{ worker_pod_name }}"
+          - "API Base: {{ cloudflare_api_base }}"
+
+    - name: Process all Pending CloudflareTask CRs
+      include_role:
+        name: cloudflare_worker
+      vars:
+        operator_namespace: "{{ operator_namespace }}"
+        worker_pod_name: "{{ worker_pod_name }}"
+        cloudflare_api_base: "{{ cloudflare_api_base }}"

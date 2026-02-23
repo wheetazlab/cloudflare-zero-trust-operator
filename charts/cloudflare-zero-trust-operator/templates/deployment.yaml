@@ -41,6 +41,9 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
+            # Three-tier role selector – manager spawns kube_worker and cloudflare_worker
+            - name: ROLE
+              value: "manager"
             # Switches that control the Ansible operator loop
             - name: WATCH_NAMESPACES
               value: {{ .Values.operator.watchNamespaces | quote }}
@@ -56,6 +59,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # Pod name – used by cloudflare_worker to claim CloudflareTask CRs
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             {{- with .Values.operator.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

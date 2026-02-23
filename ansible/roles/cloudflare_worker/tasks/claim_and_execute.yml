@@ -1,0 +1,62 @@
+---
+# cloudflare_worker — claim_and_execute.yml
+# Orchestrates the full lifecycle of a single CloudflareTask:
+#   claim → execute → report_result (or report_failure)
+#
+# Variables (via include_tasks loop):
+#   - cfzt_task: The CloudflareTask resource
+
+- name: Set task identity facts
+  ansible.builtin.set_fact:
+    ct_name: "{{ cfzt_task.metadata.name }}"
+    ct_hostname: "{{ cfzt_task.spec.hostname }}"
+    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name }}"
+    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace }}"
+
+- name: Claim task — patch status to InProgress
+  kubernetes.core.k8s:
+    state: patched
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareTask
+    name: "{{ ct_name }}"
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+    definition:
+      status:
+        phase: InProgress
+        message: "Claimed by {{ worker_pod_name }}"
+        workerPod: "{{ worker_pod_name }}"
+  register: claim_result
+
+- name: Log task claimed
+  ansible.builtin.debug:
+    msg: "cloudflare_worker: claimed task {{ ct_name }} ({{ ct_route_namespace }}/{{ ct_route_name }})"
+
+# ─── Execute all Cloudflare API operations ────────────────────────────────────
+
+- name: Execute Cloudflare operations for task
+  block:
+    - name: Execute Cloudflare API operations
+      include_tasks: execute_task.yml
+
+    - name: Report success
+      include_tasks: report_result.yml
+
+  rescue:
+    - name: Report task failure
+      kubernetes.core.k8s:
+        state: patched
+        api_version: cfzt.cloudflare.com/v1alpha1
+        kind: CloudflareTask
+        name: "{{ ct_name }}"
+        namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+        definition:
+          status:
+            phase: Failed
+            message: "{{ ansible_failed_result.msg | default('Unknown error during Cloudflare API execution') }}"
+            workerPod: "{{ worker_pod_name }}"
+
+    - name: Log task failure
+      ansible.builtin.debug:
+        msg: >-
+          cloudflare_worker: task {{ ct_name }} FAILED —
+          {{ ansible_failed_result.msg | default('see CloudflareTask status for details') }}

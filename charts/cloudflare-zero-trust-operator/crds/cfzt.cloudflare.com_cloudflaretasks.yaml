@@ -1,0 +1,292 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: cloudflaretasks.cfzt.cloudflare.com
+spec:
+  group: cfzt.cloudflare.com
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            CloudflareTask is the communication bus between the kube_worker and
+            cloudflare_worker pods. The kube_worker creates one task per HTTPRoute
+            that needs Cloudflare reconciliation. The cloudflare_worker claims the
+            task, executes all Cloudflare API operations, and writes results back to
+            the task status. The kube_worker then reads the results and patches the
+            HTTPRoute annotations.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - httprouteRef
+                - tenantRef
+                - hostname
+                - operations
+              properties:
+
+                # Source HTTPRoute
+                httprouteRef:
+                  type: object
+                  description: "The HTTPRoute that triggered this task"
+                  required: [name, namespace]
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    uid:
+                      type: string
+
+                # Tenant context
+                tenantRef:
+                  type: object
+                  description: "Tenant providing credentials and account context"
+                  required: [name, namespace]
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+
+                # Resolved credentials — kube_worker pre-fetches so cloudflare_worker
+                # only needs CloudflareTask RBAC (not Secrets RBAC)
+                credentialSecretRef:
+                  type: object
+                  description: "Reference to the Secret containing the Cloudflare API token"
+                  required: [name, namespace]
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    key:
+                      type: string
+                      default: token
+
+                # Core routing context
+                hostname:
+                  type: string
+                  description: "Public hostname to manage (e.g. myapp.example.com)"
+                accountId:
+                  type: string
+                  description: "Cloudflare Account ID"
+                tunnelId:
+                  type: string
+                  description: "Cloudflare Tunnel ID to use for routing"
+                zoneId:
+                  type: string
+                  description: "Cloudflare Zone ID (may be empty — cloudflare_worker auto-discovers)"
+
+                # What operations to perform
+                operations:
+                  type: object
+                  description: "Which Cloudflare operations to perform for this task"
+                  properties:
+                    tunnelRoute:
+                      type: object
+                      description: "Create/update tunnel ingress rule"
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                        originService:
+                          type: string
+                        httpRedirect:
+                          type: boolean
+                          default: true
+                        noTLSVerify:
+                          type: boolean
+                          default: false
+                        originServerName:
+                          type: string
+                        caPool:
+                          type: string
+                        tlsTimeout:
+                          type: integer
+                          default: 10
+                        http2Origin:
+                          type: boolean
+                          default: false
+                        matchSNIToHost:
+                          type: boolean
+                          default: false
+                    cnameDns:
+                      type: object
+                      description: "Create/update tunnel CNAME DNS record"
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                    accessApp:
+                      type: object
+                      description: "Create/update Access Application"
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        sessionDuration:
+                          type: string
+                          default: "24h"
+                        existingPolicyIds:
+                          type: array
+                          items:
+                            type: string
+                        allowEmails:
+                          type: array
+                          items:
+                            type: string
+                        allowGroups:
+                          type: array
+                          items:
+                            type: string
+                        autoRedirectToIdentity:
+                          type: boolean
+                          default: false
+                        enableBindingCookie:
+                          type: boolean
+                          default: false
+                        httpOnlyCookieAttribute:
+                          type: boolean
+                          default: true
+                        sameSiteCookieAttribute:
+                          type: string
+                          enum: ["none", "lax", "strict"]
+                          default: "lax"
+                        logoUrl:
+                          type: string
+                        skipInterstitial:
+                          type: boolean
+                          default: false
+                        appLauncherVisible:
+                          type: boolean
+                          default: true
+                        serviceAuth401Redirect:
+                          type: boolean
+                          default: false
+                        customDenyMessage:
+                          type: string
+                        customDenyUrl:
+                          type: string
+                        customNonIdentityDenyUrl:
+                          type: string
+                    serviceToken:
+                      type: object
+                      description: "Create Cloudflare service token"
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        duration:
+                          type: string
+                          default: "8760h"
+                    dnsRecord:
+                      type: object
+                      description: "Create/update DNS A record (dns-only mode)"
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        ip:
+                          type: string
+                        proxied:
+                          type: boolean
+                          default: false
+                        ttl:
+                          type: integer
+                          default: 120
+
+                # Existing Cloudflare resource IDs from previous reconcile
+                # Used for idempotent updates instead of blind creates
+                existingIds:
+                  type: object
+                  description: "Cloudflare resource IDs stored from previous reconcile"
+                  properties:
+                    hostnameRouteId:
+                      type: string
+                    cnameRecordId:
+                      type: string
+                    accessAppId:
+                      type: string
+                    accessPolicyIds:
+                      type: string
+                    serviceTokenId:
+                      type: string
+                    dnsRecordId:
+                      type: string
+
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  description: "Task lifecycle phase"
+                  enum: ["Pending", "InProgress", "Completed", "Failed"]
+                  default: "Pending"
+                message:
+                  type: string
+                  description: "Human-readable status message or error detail"
+                lastTransitionTime:
+                  type: string
+                  format: date-time
+                workerPod:
+                  type: string
+                  description: "Name of the cloudflare_worker pod that claimed this task"
+                result:
+                  type: object
+                  description: "Cloudflare resource IDs produced by this task"
+                  properties:
+                    hostnameRouteId:
+                      type: string
+                    cnameRecordId:
+                      type: string
+                    accessAppId:
+                      type: string
+                    accessPolicyIds:
+                      type: string
+                    serviceTokenId:
+                      type: string
+                    serviceTokenSecretName:
+                      type: string
+                    dnsRecordId:
+                      type: string
+                    dnsRecordIp:
+                      type: string
+                    resolvedZoneId:
+                      type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: HTTPRoute
+          type: string
+          jsonPath: .spec.httprouteRef.name
+        - name: Hostname
+          type: string
+          jsonPath: .spec.hostname
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Worker
+          type: string
+          jsonPath: .status.workerPod
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: cloudflaretasks
+    singular: cloudflaretask
+    kind: CloudflareTask
+    shortNames:
+      - cfztask
+      - cftask

@@ -1,0 +1,73 @@
+---
+# kube_worker — reconcile a single CloudflareZeroTrustTenant
+# Mirrors tenant_reconcile/tasks/main.yml but creates CloudflareTask CRs
+# instead of making direct Cloudflare API calls.
+#
+# Variables:
+#   - tenant: The CloudflareZeroTrustTenant resource
+#   - cfzt_httproutes: All discovered HTTPRoutes
+#   - cloudflare_api_base: Cloudflare API base URL
+#   - operator_namespace: Namespace where operator runs
+
+- name: Set tenant facts
+  ansible.builtin.set_fact:
+    tenant_name: "{{ tenant.metadata.name }}"
+    tenant_namespace: "{{ tenant.metadata.namespace }}"
+    tenant_account_id: "{{ tenant.spec.accountId }}"
+    tenant_tunnel_id: "{{ tenant.spec.tunnelId }}"
+    tenant_zone_id: "{{ tenant.spec.zoneId | default('') }}"
+    tenant_credential_ref: "{{ tenant.spec.credentialRef }}"
+    tenant_defaults: "{{ tenant.spec.defaults | default({}) }}"
+
+- name: Display tenant reconciliation start
+  ansible.builtin.debug:
+    msg: "kube_worker: reconciling tenant {{ tenant_namespace }}/{{ tenant_name }}"
+
+- name: Get Cloudflare API token Secret (needed for zone ID resolution)
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ tenant_credential_ref.name }}"
+    namespace: "{{ tenant_namespace }}"
+  register: credential_secret
+
+- name: Fail if credential secret not found
+  ansible.builtin.fail:
+    msg: "Credential secret {{ tenant_credential_ref.name }} not found in namespace {{ tenant_namespace }}"
+  when: credential_secret.resources | length == 0
+
+- name: Extract API token
+  ansible.builtin.set_fact:
+    api_token: "{{ credential_secret.resources[0].data[tenant_credential_ref.key | default('token')] | b64decode }}"
+
+- name: Filter HTTPRoutes that belong to this tenant's namespace
+  ansible.builtin.set_fact:
+    tenant_httproutes: "{{ cfzt_httproutes | selectattr('metadata.namespace', 'equalto', tenant_namespace) | list }}"
+
+- name: Further filter by tenant annotation when present
+  ansible.builtin.set_fact:
+    tenant_httproutes: >-
+      {{
+        tenant_httproutes
+        | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined')
+        | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'equalto', tenant_name)
+        | list
+      }}
+  when: >
+    tenant_httproutes
+    | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined')
+    | list | length > 0
+
+- name: Display HTTPRoute count
+  ansible.builtin.debug:
+    msg: "kube_worker: found {{ tenant_httproutes | length }} HTTPRoute(s) for tenant {{ tenant_name }}"
+
+- name: Create CloudflareTask CRs for each HTTPRoute
+  include_tasks: create_task.yml
+  loop: "{{ tenant_httproutes }}"
+  loop_control:
+    loop_var: httproute
+    label: "{{ httproute.metadata.namespace }}/{{ httproute.metadata.name }}"
+  vars:
+    cloudflare_api_base: "{{ cloudflare_api_base }}"
+    operator_namespace: "{{ operator_namespace }}"

@@ -1,21 +1,42 @@
 #!/bin/bash
 set -e
 
-# Display startup banner
-echo "======================================"
-echo "Cloudflare Zero Trust Operator"
-echo "======================================"
-echo "Watch Namespaces: ${WATCH_NAMESPACES:-ALL}"
-echo "Poll Interval: ${POLL_INTERVAL_SECONDS:-60}s"
-echo "Log Level: ${LOG_LEVEL:-INFO}"
-echo "======================================"
-
 # Set defaults
+export ROLE="${ROLE:-manager}"
 export POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-60}"
 export WATCH_NAMESPACES="${WATCH_NAMESPACES:-}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 export CLOUDFLARE_API_BASE="${CLOUDFLARE_API_BASE:-https://api.cloudflare.com/client/v4}"
 export OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-cloudflare-zero-trust}"
+export POD_NAME="${POD_NAME:-unknown}"
+
+# Select playbook based on ROLE
+case "${ROLE}" in
+    kube_worker)
+        PLAYBOOK="reconcile_kube_worker.yml"
+        ;;
+    cloudflare_worker)
+        PLAYBOOK="reconcile_cloudflare_worker.yml"
+        ;;
+    manager|*)
+        PLAYBOOK="reconcile.yml"
+        if [ "${ROLE}" != "manager" ]; then
+            echo "WARNING: Unknown ROLE='${ROLE}', falling back to manager mode"
+        fi
+        ;;
+esac
+
+# Display startup banner
+echo "======================================"
+echo "Cloudflare Zero Trust Operator"
+echo "======================================"
+echo "Role: ${ROLE}"
+echo "Playbook: ${PLAYBOOK}"
+echo "Watch Namespaces: ${WATCH_NAMESPACES:-ALL}"
+echo "Poll Interval: ${POLL_INTERVAL_SECONDS:-60}s"
+echo "Log Level: ${LOG_LEVEL:-INFO}"
+echo "Pod Name: ${POD_NAME}"
+echo "======================================"
 
 # Set Ansible environment
 export ANSIBLE_CONFIG="/ansible/ansible.cfg"
@@ -46,13 +67,15 @@ esac
 
 # Function to run reconciliation
 run_reconciliation() {
-    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting reconciliation cycle..."
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting reconciliation cycle (role=${ROLE})..."
     
-    ansible-playbook /ansible/playbooks/reconcile.yml \
+    ansible-playbook /ansible/playbooks/${PLAYBOOK} \
         -e "poll_interval=${POLL_INTERVAL_SECONDS}" \
         -e "watch_namespaces=${WATCH_NAMESPACES}" \
         -e "log_level=${LOG_LEVEL}" \
-        -e "cloudflare_api_base=${CLOUDFLARE_API_BASE}"
+        -e "cloudflare_api_base=${CLOUDFLARE_API_BASE}" \
+        -e "operator_namespace=${OPERATOR_NAMESPACE}" \
+        -e "worker_pod_name=${POD_NAME}"
     
     reconcile_rc=$?
     

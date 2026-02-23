@@ -1,0 +1,54 @@
+---
+# cloudflare_worker/tasks/main.yml
+# Entry point for the cloudflare_worker role.
+# Lists all Pending CloudflareTask CRs and processes each one.
+#
+# Variables:
+#   - operator_namespace: Namespace where CloudflareTask CRs live
+#   - worker_pod_name: Name of this pod (used to claim tasks)
+#   - cloudflare_api_base: Cloudflare API base URL
+
+- name: List Pending CloudflareTask CRs
+  kubernetes.core.k8s_info:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareTask
+    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+  register: all_tasks
+
+- name: Filter tasks with Pending phase
+  ansible.builtin.set_fact:
+    pending_tasks: >-
+      {{
+        all_tasks.resources
+        | selectattr('status', 'defined')
+        | selectattr('status.phase', 'defined')
+        | selectattr('status.phase', 'equalto', 'Pending')
+        | list
+      }}
+    # Also pick up tasks that have no status yet (freshly created)
+    unstarted_tasks: >-
+      {{
+        all_tasks.resources
+        | rejectattr('status', 'defined')
+        | list
+        +
+        all_tasks.resources
+        | selectattr('status', 'defined')
+        | rejectattr('status.phase', 'defined')
+        | list
+      }}
+
+- name: Combine tasks to process
+  ansible.builtin.set_fact:
+    tasks_to_process: "{{ pending_tasks + unstarted_tasks }}"
+
+- name: Log pending task count
+  ansible.builtin.debug:
+    msg: "cloudflare_worker: found {{ tasks_to_process | length }} CloudflareTask(s) to process"
+
+- name: Process each Pending CloudflareTask
+  include_tasks: claim_and_execute.yml
+  loop: "{{ tasks_to_process }}"
+  loop_control:
+    loop_var: cfzt_task
+    label: "{{ cfzt_task.metadata.name }}"

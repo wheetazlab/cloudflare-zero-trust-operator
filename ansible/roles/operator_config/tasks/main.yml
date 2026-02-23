@@ -38,3 +38,9 @@
   when: 
     - operator_configs.resources | length > 0
     - operator_config.metadata is defined
+
+- name: "Operator Config | Ensure worker Deployments exist (manager mode)"
+  include_tasks: manage_worker_deployments.yml
+  vars:
+    operator_namespace: "{{ operator_namespace }}"
+  when: role | default('manager') == 'manager'

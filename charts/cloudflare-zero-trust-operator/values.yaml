@@ -147,7 +147,11 @@ tenant:
   # (Required when create=true) Your Cloudflare Tunnel ID (UUID).
   tunnelId: ""
 
-  # (Optional) Cloudflare Zone ID (32-char hex).
+  # (Optional but strongly recommended) Cloudflare Zone ID (32-char hex).
+  # Required for automatic DNS management:
+  #   - Tunnel mode:   operator creates the CNAME <hostname> → <tunnel-id>.cfargotunnel.com
+  #   - dns-only mode: operator creates an A record pointing at your cluster VIP
+  # Without zoneId the operator logs a warning and DNS must be managed manually.
   zoneId: ""
 
   # Cloudflare API token — provide EXACTLY ONE of the two options below.

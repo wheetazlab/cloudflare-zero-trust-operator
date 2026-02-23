@@ -1,0 +1,144 @@
+---
+# Manage Cloudflare DNS A Record (proxy disabled by default)
+# Used for dns-only mode — routes traffic directly to a cluster VIP/IP
+# without going through a Cloudflare Tunnel.
+#
+# Variables required:
+#   - cf_api_token:   Cloudflare API token (needs Zone: DNS: Edit)
+#   - cf_zone_id:     Cloudflare Zone ID (32-char hex)
+#   - cf_hostname:    Fully-qualified hostname (e.g. app.example.com)
+#   - cf_ip_address:  IPv4 address the record should resolve to
+#   - cf_api_base:    Cloudflare API base URL
+#
+# Optional variables:
+#   - cf_proxied:             Enable Cloudflare proxy (default: false — DNS-only)
+#   - cf_ttl:                 TTL in seconds; use 1 for auto (default: 120)
+#   - cf_existing_record_id:  Known record ID — skips the lookup if provided
+#
+# Returns:
+#   dns_record_result.record_id   - ID of the DNS record
+#   dns_record_result.ip_address  - IP address written
+#   dns_record_result.created     - true if record was created, false if updated/unchanged
+
+- name: Set DNS record defaults
+  ansible.builtin.set_fact:
+    dns_proxied: "{{ cf_proxied | default(false) }}"
+    dns_ttl: "{{ cf_ttl | default(120) | int }}"
+    dns_known_id: "{{ cf_existing_record_id | default('') }}"
+
+# Only query the API when we don't already have the record ID stored
+- name: Look up existing DNS A record for hostname
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records?type=A&name={{ cf_hostname }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200]
+    return_content: true
+  register: dns_lookup_response
+  retries: 3
+  delay: 5
+  until: dns_lookup_response.status == 200
+  when: dns_known_id == ""
+
+- name: Parse existing record from lookup
+  ansible.builtin.set_fact:
+    existing_dns_record: "{{ dns_lookup_response.json.result | first | default({}) }}"
+    existing_dns_record_id: "{{ (dns_lookup_response.json.result | first | default({})).get('id', '') }}"
+    existing_dns_record_ip: "{{ (dns_lookup_response.json.result | first | default({})).get('content', '') }}"
+  when: dns_known_id == ""
+
+- name: Use known record ID (skip lookup)
+  ansible.builtin.set_fact:
+    existing_dns_record: {}
+    existing_dns_record_id: "{{ dns_known_id }}"
+    existing_dns_record_ip: ""   # Force update path so we confirm the IP
+  when: dns_known_id != ""
+
+# --- Create path ---
+
+- name: Create DNS A record (record does not exist)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "A"
+      name: "{{ cf_hostname }}"
+      content: "{{ cf_ip_address }}"
+      ttl: "{{ dns_ttl }}"
+      proxied: "{{ dns_proxied }}"
+    status_code: [200, 201]
+    return_content: true
+  register: create_dns_response
+  retries: 3
+  delay: 5
+  until: create_dns_response.status in [200, 201]
+  when: existing_dns_record_id == ""
+
+# --- Update path (IP changed or we had a stored ID but need to confirm) ---
+
+- name: Update DNS A record (IP changed or confirming stored ID)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records/{{ existing_dns_record_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "A"
+      name: "{{ cf_hostname }}"
+      content: "{{ cf_ip_address }}"
+      ttl: "{{ dns_ttl }}"
+      proxied: "{{ dns_proxied }}"
+    status_code: [200]
+    return_content: true
+  register: update_dns_response
+  retries: 3
+  delay: 5
+  until: update_dns_response.status == 200
+  when: existing_dns_record_id != "" and existing_dns_record_ip != cf_ip_address
+
+# --- No-op path ---
+
+- name: DNS record already correct
+  ansible.builtin.debug:
+    msg: "DNS A record for {{ cf_hostname }} already points to {{ cf_ip_address }} (record id: {{ existing_dns_record_id }})"
+    verbosity: 1
+  when: existing_dns_record_id != "" and existing_dns_record_ip == cf_ip_address
+
+# --- Set result fact (all three paths) ---
+
+- name: Set dns_record_result — created
+  ansible.builtin.set_fact:
+    dns_record_result:
+      record_id: "{{ create_dns_response.json.result.id }}"
+      ip_address: "{{ cf_ip_address }}"
+      created: true
+  when: existing_dns_record_id == ""
+
+- name: Set dns_record_result — updated
+  ansible.builtin.set_fact:
+    dns_record_result:
+      record_id: "{{ existing_dns_record_id }}"
+      ip_address: "{{ cf_ip_address }}"
+      created: false
+  when: existing_dns_record_id != "" and existing_dns_record_ip != cf_ip_address
+
+- name: Set dns_record_result — no-op
+  ansible.builtin.set_fact:
+    dns_record_result:
+      record_id: "{{ existing_dns_record_id }}"
+      ip_address: "{{ cf_ip_address }}"
+      created: false
+  when: existing_dns_record_id != "" and existing_dns_record_ip == cf_ip_address
+
+- name: Display DNS record result
+  ansible.builtin.debug:
+    msg: "DNS A record {{ 'created' if dns_record_result.created else 'updated/verified' }}: {{ cf_hostname }} → {{ dns_record_result.ip_address }} (id: {{ dns_record_result.record_id }})"
+    verbosity: 1

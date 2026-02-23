@@ -153,6 +153,53 @@ spec:
                       type: string
                       default: "8760h"
                       description: "Service token lifetime (e.g., 8760h = 1 year)"
+
+                # DNS-only mode
+                # Creates a plain DNS A record pointing at a cluster VIP/IP instead of
+                # routing through a Cloudflare Tunnel. Access Application and Service
+                # Token features are not available in this mode.
+                # Requires tenant.zoneId to be set.
+                dnsOnly:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: |
+                        DNS-only mode: create an A record pointing directly at a cluster IP
+                        instead of publishing a tunnel hostname route. No tunnel required.
+                        tenant.zoneId must be set. Access Application and Service Token
+                        are not supported and will be ignored.
+                    proxied:
+                      type: boolean
+                      default: false
+                      description: "Enable Cloudflare proxy (orange cloud). Default false — DNS record only, traffic goes direct."
+                    ttl:
+                      type: integer
+                      minimum: 1
+                      maximum: 86400
+                      default: 120
+                      description: "DNS record TTL in seconds. Use 1 for Auto (only valid when proxied=true). Default: 120."
+                    staticIp:
+                      type: string
+                      description: |
+                        Static IPv4 address for the A record. Takes precedence over
+                        ingressServiceRef when both are specified.
+                    ingressServiceRef:
+                      type: object
+                      description: |
+                        Discover the cluster VIP from a Kubernetes Service's LoadBalancer
+                        status (.status.loadBalancer.ingress[0].ip). Used when staticIp is
+                        not set. The Service must have type LoadBalancer with an assigned IP.
+                      properties:
+                        name:
+                          type: string
+                          description: "Name of the Kubernetes Service"
+                        namespace:
+                          type: string
+                          description: "Namespace of the Service (defaults to the HTTPRoute namespace when omitted)"
+                      required:
+                        - name
             status:
               type: object
               properties:
@@ -192,6 +239,9 @@ spec:
         - name: Service Token
           type: boolean
           jsonPath: .spec.serviceToken.enabled
+        - name: DNS Only
+          type: boolean
+          jsonPath: .spec.dnsOnly.enabled
         - name: Used By
           type: integer
           jsonPath: .status.usedByHTTPRoutes

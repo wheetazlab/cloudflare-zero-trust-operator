@@ -47,7 +47,11 @@ spec:
                   pattern: ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
                 zoneId:
                   type: string
-                  description: Cloudflare Zone ID (optional)
+                  description: >
+                    Cloudflare Zone ID (32-char hex). Required for automatic DNS
+                    management: tunnel mode uses it to create CNAME records, dns-only
+                    mode uses it to create A records. If omitted, DNS records must be
+                    managed manually.
                   pattern: ^[a-f0-9]{32}$
                 credentialRef:
                   type: object

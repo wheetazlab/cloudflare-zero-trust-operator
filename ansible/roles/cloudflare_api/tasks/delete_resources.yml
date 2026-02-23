@@ -87,6 +87,25 @@
       when: tunnel_config_response.status == 200
   when: delete_tunnel_id is defined and delete_hostname is defined
 
+# Delete a DNS record — handles both dns-only A records and tunnel CNAME records.
+# Optional variables:
+#   - delete_dns_record_id: DNS record ID to delete (A record for dns-only,
+#                           CNAME record for tunnel routes)
+#   - delete_zone_id:       Zone ID the record belongs to
+- name: Delete DNS record
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ delete_zone_id }}/dns_records/{{ delete_dns_record_id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200, 204, 404]
+  register: delete_dns_response
+  retries: 3
+  delay: 5
+  until: delete_dns_response.status in [200, 204, 404]
+  when: delete_dns_record_id is defined and delete_dns_record_id != "" and delete_zone_id is defined and delete_zone_id != ""
+
 - name: Set deletion result
   ansible.builtin.set_fact:
     deletion_result:
@@ -94,3 +113,4 @@
       deleted_app: "{{ delete_app_id | default('none') }}"
       deleted_token: "{{ delete_token_id | default('none') }}"
       deleted_hostname: "{{ delete_hostname | default('none') }}"
+      deleted_dns_record: "{{ delete_dns_record_id | default('none') }}"

@@ -54,6 +54,12 @@
       ansible.builtin.set_fact:
         template_spec: "{{ template_result.resources[0].spec }}"
 
+    # Detect mode: dns-only creates a plain A record instead of a tunnel route.
+    # All tunnel/access/service-token steps are skipped when this is true.
+    - name: Detect dns-only mode from template
+      ansible.builtin.set_fact:
+        dns_only_mode: "{{ template_spec.dnsOnly.enabled | default(false) }}"
+
     # Step 2: Merge template with tenant defaults (template takes precedence)
     - name: Merge origin service settings (template > tenant defaults)
       ansible.builtin.set_fact:
@@ -160,7 +166,7 @@
       ansible.builtin.debug:
         msg: "Reconciling HTTPRoute {{ ir_namespace }}/{{ ir_name }} - hostname: {{ hostname }}"
 
-    # Step 1: Create/Update Hostname Route
+    # Step 1: Create/Update Hostname Route (tunnel mode only)
     - name: Manage hostname route
       include_role:
         name: cloudflare_api
@@ -181,14 +187,47 @@
         cf_tls_timeout: "{{ tls_timeout }}"
         cf_http2_origin: "{{ http2_origin }}"
         cf_match_sni_to_host: "{{ match_sni_to_host }}"
+      when: not dns_only_mode
 
     - name: Store hostname route ID
       ansible.builtin.set_fact:
         cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'tunnel_id': tunnel_id, 'hostname': hostname}) }}"
+      when: not dns_only_mode
 
     - name: Increment hostname route counter
       ansible.builtin.set_fact:
         count_hostname_routes: "{{ count_hostname_routes | int + 1 }}"
+      when: not dns_only_mode
+
+    # Step 1b: Create/Update tunnel CNAME DNS record (tunnel mode only)
+    # Creates:  <hostname>  CNAME  <tunnel-id>.cfargotunnel.com  proxied=true
+    # Skipped when tenant_zone_id is not set (backward compat — user manages DNS)
+    - name: Manage tunnel CNAME DNS record
+      block:
+        - name: Create/Update CNAME for tunnel route
+          include_role:
+            name: cloudflare_api
+            tasks_from: manage_tunnel_cname.yml
+          vars:
+            cf_api_token: "{{ api_token }}"
+            cf_zone_id: "{{ tenant_zone_id }}"
+            cf_hostname: "{{ hostname }}"
+            cf_tunnel_id: "{{ tunnel_id }}"
+            cf_api_base: "{{ cloudflare_api_base }}"
+            cf_existing_cname_id: "{{ ir_annotations['cfzt.cloudflare.com/cnameRecordId'] | default('') }}"
+
+        - name: Store CNAME record ID
+          ansible.builtin.set_fact:
+            cloudflare_resource_ids: "{{ cloudflare_resource_ids | combine({'cname_record_id': tunnel_cname_result.record_id}) }}"
+      when: not dns_only_mode and tenant_zone_id != ""
+
+    - name: Warn that CNAME will not be created (no zoneId on tenant)
+      ansible.builtin.debug:
+        msg: >
+          WARNING: tenant '{{ tenant_name }}' has no zoneId set.
+          Tunnel ingress rule written but DNS CNAME for {{ hostname }} must be
+          created manually: {{ hostname }} CNAME {{ tunnel_id }}.cfargotunnel.com
+      when: not dns_only_mode and tenant_zone_id == ""
 
     # Step 2: Create/Update Access Application (if enabled)
     - name: Manage Access Application
@@ -370,7 +409,91 @@
 
       when: create_service_token
 
-    # Final: Update HTTPRoute with hostname route info
+    # Step DNS-only: discover IP and write A record (skipped in tunnel mode)
+    - name: DNS-only mode reconciliation
+      when: dns_only_mode
+      block:
+        - name: Validate zone ID is set for dns-only mode
+          ansible.builtin.fail:
+            msg: >-
+              tenant.zoneId must be set when using dnsOnly mode
+              (template: {{ template_name }}, httproute: {{ ir_namespace }}/{{ ir_name }})
+          when: tenant_zone_id == ""
+
+        # Option A: static IP from template
+        - name: Use static IP from template
+          ansible.builtin.set_fact:
+            dns_target_ip: "{{ template_spec.dnsOnly.staticIp }}"
+          when: template_spec.dnsOnly.staticIp is defined and template_spec.dnsOnly.staticIp | length > 0
+
+        # Option B: discover from a Kubernetes Service LoadBalancer IP
+        - name: Discover IP from ingressServiceRef
+          when: template_spec.dnsOnly.staticIp is not defined or template_spec.dnsOnly.staticIp | default('') | length == 0
+          block:
+            - name: Fail if neither staticIp nor ingressServiceRef provided
+              ansible.builtin.fail:
+                msg: >-
+                  dnsOnly mode requires either staticIp or ingressServiceRef
+                  in template '{{ template_name }}'
+              when: template_spec.dnsOnly.ingressServiceRef is not defined
+
+            - name: Resolve ingressServiceRef namespace
+              ansible.builtin.set_fact:
+                ingress_svc_namespace: "{{ template_spec.dnsOnly.ingressServiceRef.namespace | default(ir_namespace) }}"
+
+            - name: Look up LoadBalancer Service
+              kubernetes.core.k8s_info:
+                api_version: v1
+                kind: Service
+                name: "{{ template_spec.dnsOnly.ingressServiceRef.name }}"
+                namespace: "{{ ingress_svc_namespace }}"
+              register: ingress_svc_result
+
+            - name: Fail if service not found
+              ansible.builtin.fail:
+                msg: "Service {{ ingress_svc_namespace }}/{{ template_spec.dnsOnly.ingressServiceRef.name }} not found"
+              when: ingress_svc_result.resources | length == 0
+
+            - name: Extract LoadBalancer IP
+              ansible.builtin.set_fact:
+                dns_target_ip: "{{ ingress_svc_result.resources[0].status.loadBalancer.ingress[0].ip }}"
+
+            - name: Fail if service has no LoadBalancer IP yet
+              ansible.builtin.fail:
+                msg: >-
+                  Service {{ ingress_svc_namespace }}/{{ template_spec.dnsOnly.ingressServiceRef.name }}
+                  has no LoadBalancer IP assigned yet
+              when: dns_target_ip is not defined or dns_target_ip | length == 0
+
+        - name: Create/Update DNS A record
+          include_role:
+            name: cloudflare_api
+            tasks_from: manage_dns_record.yml
+          vars:
+            cf_api_token: "{{ api_token }}"
+            cf_zone_id: "{{ tenant_zone_id }}"
+            cf_hostname: "{{ hostname }}"
+            cf_ip_address: "{{ dns_target_ip }}"
+            cf_api_base: "{{ cloudflare_api_base }}"
+            cf_proxied: "{{ template_spec.dnsOnly.proxied | default(false) }}"
+            cf_ttl: "{{ template_spec.dnsOnly.ttl | default(120) }}"
+            cf_existing_record_id: "{{ ir_annotations['cfzt.cloudflare.com/dnsRecordId'] | default('') }}"
+
+        - name: Patch HTTPRoute with DNS record info
+          kubernetes.core.k8s:
+            state: patched
+            kind: HTTPRoute
+            api_version: gateway.networking.k8s.io/v1
+            name: "{{ ir_name }}"
+            namespace: "{{ ir_namespace }}"
+            definition:
+              metadata:
+                annotations:
+                  cfzt.cloudflare.com/dnsRecordId: "{{ dns_record_result.record_id }}"
+                  cfzt.cloudflare.com/dnsRecordIp: "{{ dns_record_result.ip_address }}"
+                  cfzt.cloudflare.com/lastReconcile: "{{ ansible_date_time.iso8601 }}"
+
+    # Final: Update HTTPRoute with hostname route info (tunnel mode only)
     - name: Patch HTTPRoute with hostname route info
       kubernetes.core.k8s:
         state: patched
@@ -382,7 +505,9 @@
           metadata:
             annotations:
               cfzt.cloudflare.com/hostnameRouteId: "{{ tunnel_id }}"
+              cfzt.cloudflare.com/cnameRecordId: "{{ cloudflare_resource_ids.cname_record_id | default('') }}"
               cfzt.cloudflare.com/lastReconcile: "{{ ansible_date_time.iso8601 }}"
+      when: not dns_only_mode
 
     # Update state ConfigMap with reconciliation results
     - name: Update HTTPRoute state

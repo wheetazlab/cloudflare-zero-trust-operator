@@ -1,0 +1,111 @@
+---
+# DNS-only Template Examples
+#
+# Use these when you want Cloudflare DNS to point directly at your cluster's
+# internal VIP/ingress IP rather than routing traffic through a Cloudflare Tunnel.
+#
+# Requirements:
+#   - tenant.zoneId MUST be set on the CloudflareZeroTrustTenant
+#   - API token MUST have Zone: DNS: Edit in addition to Tunnel/Access permissions
+#   - Traffic is delivered directly to your cluster — NOT proxied through Cloudflare
+#     Zero Trust network path. No tunnel is involved.
+#
+# Use cases:
+#   - Internal services reachable only over your LAN/VPN
+#   - Services where you control DNS resolution privately
+#   - Split-horizon DNS scenarios
+#
+# Limitations:
+#   - Access Application and Service Token features are NOT available in dns-only mode
+#   - Cloudflare proxy (orange cloud) is off by default; set proxied: true only if
+#     you also want Cloudflare-proxied traffic to the VIP (unusual for internal use)
+
+---
+# Option A: Static IP
+# Use this when your cluster VIP is fixed (e.g. assigned by MetalLB with a static pool)
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: internal-static
+  namespace: cloudflare-zero-trust
+spec:
+  tenantRef: prod-tenant   # must have zoneId set
+  dnsOnly:
+    enabled: true
+    staticIp: "192.168.10.100"   # your cluster LoadBalancer / MetalLB VIP
+    proxied: false               # DNS-only — traffic goes direct, not through Cloudflare
+    ttl: 120                     # 2 minutes
+
+---
+# Option B: Auto-discover IP from a Kubernetes Service
+# Use this when MetalLB or your cloud LB assigns the IP dynamically.
+# The operator reads .status.loadBalancer.ingress[0].ip from the named Service.
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: internal-auto
+  namespace: cloudflare-zero-trust
+spec:
+  tenantRef: prod-tenant
+  dnsOnly:
+    enabled: true
+    ingressServiceRef:
+      name: traefik            # Service to read the LoadBalancer IP from
+      namespace: traefik       # omit to default to the HTTPRoute's namespace
+    proxied: false
+    ttl: 120
+
+---
+# HTTPRoute examples using the dns-only templates above
+#
+# Annotate ANY HTTPRoute with cfzt.cloudflare.com/enabled: "true" and point it at
+# one of the dns-only templates.  The operator will create (or update) an A record
+# in Cloudflare DNS for cfzt.cloudflare.com/hostname pointing at the VIP.
+# The record ID and resolved IP are written back as annotations for idempotency.
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: homeassistant-internal
+  namespace: default
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/template: "internal-static"
+    cfzt.cloudflare.com/hostname: "ha.internal.example.com"
+    # Written back by the operator after first reconcile:
+    # cfzt.cloudflare.com/dnsRecordId: "abc123..."
+    # cfzt.cloudflare.com/dnsRecordIp: "192.168.10.100"
+spec:
+  parentRefs:
+    - name: default
+      namespace: default
+  hostnames:
+    - "ha.internal.example.com"
+  rules:
+    - backendRefs:
+        - name: homeassistant
+          port: 8123
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana-internal
+  namespace: monitoring
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod-tenant"
+    cfzt.cloudflare.com/template: "internal-auto"
+    cfzt.cloudflare.com/hostname: "grafana.internal.example.com"
+spec:
+  parentRefs:
+    - name: default
+      namespace: monitoring
+  hostnames:
+    - "grafana.internal.example.com"
+  rules:
+    - backendRefs:
+        - name: grafana
+          port: 3000

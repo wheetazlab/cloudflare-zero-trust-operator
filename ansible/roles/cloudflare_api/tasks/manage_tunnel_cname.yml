@@ -1,0 +1,141 @@
+---
+# Manage the Cloudflare DNS CNAME record that points a public hostname at a tunnel.
+#
+# Cloudflare Tunnel requires:
+#   app.example.com  CNAME  <tunnel-id>.cfargotunnel.com  (proxied: true)
+#
+# This task creates or updates that record. It is called automatically by the
+# tunnel-mode reconciliation loop after manage_hostname_route.yml writes the
+# ingress rule. Without this record the tunnel route is configured but
+# Cloudflare has no way to route public traffic to it.
+#
+# Variables required:
+#   - cf_api_token:          Cloudflare API token (needs Zone: DNS: Edit)
+#   - cf_zone_id:            Cloudflare Zone ID for the domain (32-char hex)
+#   - cf_hostname:           Fully-qualified hostname (e.g. app.example.com)
+#   - cf_tunnel_id:          Cloudflare Tunnel ID (UUID)
+#   - cf_api_base:           Cloudflare API base URL
+#
+# Optional variables:
+#   - cf_existing_cname_id:  Known CNAME record ID — skips the lookup if provided
+#
+# Returns:
+#   tunnel_cname_result.record_id  - ID of the CNAME record
+#   tunnel_cname_result.created    - true if created, false if already correct / updated
+
+- name: Set CNAME target
+  ansible.builtin.set_fact:
+    cname_target: "{{ cf_tunnel_id }}.cfargotunnel.com"
+    cname_known_id: "{{ cf_existing_cname_id | default('') }}"
+
+# Skip the API lookup when we already know the record ID
+- name: Look up existing CNAME record for hostname
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records?type=CNAME&name={{ cf_hostname }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200]
+    return_content: true
+  register: cname_lookup_response
+  retries: 3
+  delay: 5
+  until: cname_lookup_response.status == 200
+  when: cname_known_id == ""
+
+- name: Parse existing CNAME from lookup
+  ansible.builtin.set_fact:
+    existing_cname_id: "{{ (cname_lookup_response.json.result | first | default({})).get('id', '') }}"
+    existing_cname_content: "{{ (cname_lookup_response.json.result | first | default({})).get('content', '') }}"
+  when: cname_known_id == ""
+
+- name: Use known CNAME record ID (skip lookup)
+  ansible.builtin.set_fact:
+    existing_cname_id: "{{ cname_known_id }}"
+    existing_cname_content: ""   # empty forces the update path to confirm current content
+  when: cname_known_id != ""
+
+# --- Create path ---
+
+- name: Create CNAME record (record does not exist)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "CNAME"
+      name: "{{ cf_hostname }}"
+      content: "{{ cname_target }}"
+      ttl: 1        # auto — required when proxied=true
+      proxied: true # must be true for Cloudflare Tunnel routing
+    status_code: [200, 201]
+    return_content: true
+  register: create_cname_response
+  retries: 3
+  delay: 5
+  until: create_cname_response.status in [200, 201]
+  when: existing_cname_id == ""
+
+# --- Update path (target changed — e.g. tunnel was replaced) ---
+
+- name: Update CNAME record (target changed or confirming stored ID)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/zones/{{ cf_zone_id }}/dns_records/{{ existing_cname_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "CNAME"
+      name: "{{ cf_hostname }}"
+      content: "{{ cname_target }}"
+      ttl: 1
+      proxied: true
+    status_code: [200]
+    return_content: true
+  register: update_cname_response
+  retries: 3
+  delay: 5
+  until: update_cname_response.status == 200
+  when: existing_cname_id != "" and existing_cname_content != cname_target
+
+# --- No-op path ---
+
+- name: CNAME record already correct
+  ansible.builtin.debug:
+    msg: "CNAME for {{ cf_hostname }} already points to {{ cname_target }} (record id: {{ existing_cname_id }})"
+    verbosity: 1
+  when: existing_cname_id != "" and existing_cname_content == cname_target
+
+# --- Set result fact (all three paths) ---
+
+- name: Set tunnel_cname_result — created
+  ansible.builtin.set_fact:
+    tunnel_cname_result:
+      record_id: "{{ create_cname_response.json.result.id }}"
+      created: true
+  when: existing_cname_id == ""
+
+- name: Set tunnel_cname_result — updated
+  ansible.builtin.set_fact:
+    tunnel_cname_result:
+      record_id: "{{ existing_cname_id }}"
+      created: false
+  when: existing_cname_id != "" and existing_cname_content != cname_target
+
+- name: Set tunnel_cname_result — no-op
+  ansible.builtin.set_fact:
+    tunnel_cname_result:
+      record_id: "{{ existing_cname_id }}"
+      created: false
+  when: existing_cname_id != "" and existing_cname_content == cname_target
+
+- name: Display CNAME result
+  ansible.builtin.debug:
+    msg: "CNAME {{ 'created' if tunnel_cname_result.created else 'verified/updated' }}: {{ cf_hostname }} → {{ cname_target }} (id: {{ tunnel_cname_result.record_id }})"
+    verbosity: 1

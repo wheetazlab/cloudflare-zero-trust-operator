@@ -120,19 +120,25 @@ rbac:
   create: true
 
 # -------------------------------------------------------------------
-# Initial Tenant (org-level Cloudflare config)
-# Set tenant.create=true to have Helm create the Secret and
-# CloudflareZeroTrustTenant CR on first install.
+# Tenant bootstrap (optional, disabled by default)
+#
+# When tenant.create=true, Helm will render a CloudflareZeroTrustTenant
+# CR and (if apiToken is set) the accompanying API-token Secret.
+#
+# ALL fields marked "Required when create=true" MUST be supplied —
+# the chart will fail at render time if any are missing.
 # -------------------------------------------------------------------
 tenant:
   # Set to true to create the Tenant CR and API token Secret.
+  # Nothing is rendered when this is false.
   create: false
 
-  # Name of the CloudflareZeroTrustTenant CR.
-  name: "default-tenant"
+  # (Required when create=true) Name of the CloudflareZeroTrustTenant CR.
+  # There is intentionally no default — you must choose a meaningful name.
+  name: ""
 
   # Namespace in which the Tenant CR and Secret are created.
-  # Defaults to the operator namespace if left empty.
+  # Defaults to the operator's release namespace when left empty.
   namespace: ""
 
   # (Required when create=true) Your Cloudflare Account ID (32-char hex).
@@ -144,22 +150,27 @@ tenant:
   # (Optional) Cloudflare Zone ID (32-char hex).
   zoneId: ""
 
-  # Cloudflare API token — provide ONE of the following:
-  # Option A: Inline plaintext token (will be stored in a Secret).
-  #   Needs: Account → Cloudflare Tunnel: Edit, Account → Access: Edit
+  # Cloudflare API token — provide EXACTLY ONE of the two options below.
+  # Helm will fail at render time if neither is provided.
+  #
+  # Option A: Inline plaintext token (stored in a new Secret).
+  #   Required permissions: Account → Cloudflare Tunnel: Edit,
+  #                         Account → Access: Edit
   apiToken: ""
 
-  # Option B: Reference an existing Secret already in the cluster.
-  #   Ignored if apiToken is set.
+  # Option B: Reference a pre-existing Secret already in the cluster.
+  #   Ignored when apiToken is set.
   existingSecret:
     name: ""
     key: "token"
 
-  # Defaults applied to all managed resources under this tenant.
+  # Default values applied to every managed resource under this tenant.
+  # All of these are optional.
   defaults:
     sessionDuration: "24h"
-    # Origin service URL (scheme determines service type).
-    # Typically points at your ingress controller ClusterIP or FQDN.
+    # Origin service URL — scheme determines service type:
+    #   http://   plain HTTP    tcp://   raw TCP
+    #   https://  HTTPS (TLS)  unix://  Unix socket
     originService: ""
     httpRedirect: true
     originTLS:

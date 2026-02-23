@@ -1,4 +1,5 @@
 {{- if .Values.tenant.create }}
+{{- $name := required "tenant.name is required when tenant.create=true" .Values.tenant.name }}
 {{- $ns := .Values.tenant.namespace | default (include "cloudflare-zero-trust-operator.namespace" .) }}
 ---
 {{- if .Values.tenant.apiToken }}
@@ -6,7 +7,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ printf "%s-api-token" .Values.tenant.name }}
+  name: {{ printf "%s-api-token" $name }}
   namespace: {{ $ns }}
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
@@ -19,7 +20,7 @@ stringData:
 apiVersion: cfzt.cloudflare.com/v1alpha1
 kind: CloudflareZeroTrustTenant
 metadata:
-  name: {{ .Values.tenant.name }}
+  name: {{ $name }}
   namespace: {{ $ns }}
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
@@ -31,7 +32,7 @@ spec:
   {{- end }}
   credentialRef:
     {{- if .Values.tenant.apiToken }}
-    name: {{ printf "%s-api-token" .Values.tenant.name }}
+    name: {{ printf "%s-api-token" $name }}
     key: "token"
     {{- else if .Values.tenant.existingSecret.name }}
     name: {{ .Values.tenant.existingSecret.name | quote }}

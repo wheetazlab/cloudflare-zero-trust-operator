@@ -118,3 +118,52 @@ securityContext:
 # -------------------------------------------------------------------
 rbac:
   create: true
+
+# -------------------------------------------------------------------
+# Initial Tenant (org-level Cloudflare config)
+# Set tenant.create=true to have Helm create the Secret and
+# CloudflareZeroTrustTenant CR on first install.
+# -------------------------------------------------------------------
+tenant:
+  # Set to true to create the Tenant CR and API token Secret.
+  create: false
+
+  # Name of the CloudflareZeroTrustTenant CR.
+  name: "default-tenant"
+
+  # Namespace in which the Tenant CR and Secret are created.
+  # Defaults to the operator namespace if left empty.
+  namespace: ""
+
+  # (Required when create=true) Your Cloudflare Account ID (32-char hex).
+  accountId: ""
+
+  # (Required when create=true) Your Cloudflare Tunnel ID (UUID).
+  tunnelId: ""
+
+  # (Optional) Cloudflare Zone ID (32-char hex).
+  zoneId: ""
+
+  # Cloudflare API token — provide ONE of the following:
+  # Option A: Inline plaintext token (will be stored in a Secret).
+  #   Needs: Account → Cloudflare Tunnel: Edit, Account → Access: Edit
+  apiToken: ""
+
+  # Option B: Reference an existing Secret already in the cluster.
+  #   Ignored if apiToken is set.
+  existingSecret:
+    name: ""
+    key: "token"
+
+  # Defaults applied to all managed resources under this tenant.
+  defaults:
+    sessionDuration: "24h"
+    # Origin service URL (scheme determines service type).
+    # Typically points at your ingress controller ClusterIP or FQDN.
+    originService: ""
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 10
+      http2Origin: false
+      matchSNIToHost: false

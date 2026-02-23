@@ -1,0 +1,53 @@
+{{- if .Values.tenant.create }}
+{{- $ns := .Values.tenant.namespace | default (include "cloudflare-zero-trust-operator.namespace" .) }}
+---
+{{- if .Values.tenant.apiToken }}
+# Secret holding the Cloudflare API token (created from values.tenant.apiToken)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ printf "%s-api-token" .Values.tenant.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  token: {{ .Values.tenant.apiToken | quote }}
+---
+{{- end }}
+# CloudflareZeroTrustTenant – the org-level CR the operator reconciles against
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTenant
+metadata:
+  name: {{ .Values.tenant.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+spec:
+  accountId: {{ required "tenant.accountId is required when tenant.create=true" .Values.tenant.accountId | quote }}
+  tunnelId: {{ required "tenant.tunnelId is required when tenant.create=true" .Values.tenant.tunnelId | quote }}
+  {{- if .Values.tenant.zoneId }}
+  zoneId: {{ .Values.tenant.zoneId | quote }}
+  {{- end }}
+  credentialRef:
+    {{- if .Values.tenant.apiToken }}
+    name: {{ printf "%s-api-token" .Values.tenant.name }}
+    key: "token"
+    {{- else if .Values.tenant.existingSecret.name }}
+    name: {{ .Values.tenant.existingSecret.name | quote }}
+    key: {{ .Values.tenant.existingSecret.key | quote }}
+    {{- else }}
+    {{- fail "Either tenant.apiToken or tenant.existingSecret.name must be set when tenant.create=true" }}
+    {{- end }}
+  defaults:
+    sessionDuration: {{ .Values.tenant.defaults.sessionDuration | quote }}
+    {{- if .Values.tenant.defaults.originService }}
+    originService: {{ .Values.tenant.defaults.originService | quote }}
+    {{- end }}
+    httpRedirect: {{ .Values.tenant.defaults.httpRedirect }}
+    originTLS:
+      noTLSVerify: {{ .Values.tenant.defaults.originTLS.noTLSVerify }}
+      tlsTimeout: {{ .Values.tenant.defaults.originTLS.tlsTimeout }}
+      http2Origin: {{ .Values.tenant.defaults.originTLS.http2Origin }}
+      matchSNIToHost: {{ .Values.tenant.defaults.originTLS.matchSNIToHost }}
+{{- end }}

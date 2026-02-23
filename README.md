@@ -104,19 +104,39 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 
 ## Architecture
 
+The operator runs as **three coordinated Deployments** in the same namespace, all from the same container image, differentiated by the `ROLE` environment variable:
+
 ```
-┌─────────────────────┐      ┌──────────────────────┐      ┌─────────────────┐
-│  HTTPRoute          │─────▶│  CFZT Operator       │─────▶│   Cloudflare    │
-│  (annotations)      │      │  (Ansible container) │      │   Zero Trust    │
-└─────────────────────┘      └──────────────────────┘      └─────────────────┘
-        ▲                              │
-        │   write-back IDs             │  reads credentials from
-        └──────────────────────┐       ▼
-                               │  ┌──────────────────────┐
-                               └──│  CloudflareZeroTrust │
-                                  │  Tenant CR + Secret  │
-                                  └──────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Kubernetes Cluster                                             │
+│                                                                 │
+│  ┌──────────────┐   ensures exist    ┌──────────────────────┐  │
+│  │   manager    │──────────────────▶ │   kube_worker        │  │
+│  │   pod        │                    │   pod                │  │
+│  │  (syncs      │──────────────────▶ │                      │  │
+│  │  OperatorCfg)│   ensures exist    │  reads HTTPRoutes    │  │
+│  └──────────────┘                    │  creates Tasks ──────┼──┼──┐
+│                                      └──────────────────────┘  │  │
+│                                                                 │  │
+│  ┌────────────────────────────┐       CloudflareTask CRs        │  │
+│  │  cloudflare_worker pod     │◀──────────────────────────────  │◀─┘
+│  │                            │       (work queue)              │
+│  │  claims + executes tasks   │────────────────────────────────▶│  Cloudflare API
+│  │  writes result IDs back    │                                 │  (tunnel/DNS/Access)
+│  └────────────────────────────┘                                 │
+│                                                                 │
+│  HTTPRoutes ◀── IDs written back by kube_worker                 │
+│  Tenant CRs + Secrets ◀── credentials                          │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**`kube_worker`** is Kubernetes-only — it reads `HTTPRoute` annotations, detects changes via SHA256 hash, and creates `CloudflareTask` CRs as work items.
+
+**`cloudflare_worker`** is API-only — it claims tasks and makes all Cloudflare REST API calls (tunnel routes, DNS, Access apps, service tokens), writing result IDs back to the task status.
+
+**`manager`** keeps the other two Deployments healthy and applies any `CloudflareZeroTrustOperatorConfig` CR changes to the operator's own Deployment.
+
+See [docs/architecture.md](docs/architecture.md) for the full three-tier design and [docs/flow.md](docs/flow.md) for the reconciliation flow.
 
 ## Development
 

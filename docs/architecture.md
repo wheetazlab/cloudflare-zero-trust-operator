@@ -7,6 +7,7 @@ Complete architecture documentation for the Cloudflare Zero Trust Operator, from
 
 - [Overview](#overview)
 - [System Architecture](#system-architecture)
+- [Three-Tier Architecture](#three-tier-architecture)
 - [Build Process](#build-process)
 - [Deployment Architecture](#deployment-architecture)
 - [Runtime Architecture](#runtime-architecture)
@@ -377,36 +378,141 @@ spec:
       effect: "NoSchedule"
 ```
 
+## Three-Tier Architecture
+
+The operator runs as **three separate Deployments**, each handling a distinct concern. All three use the same container image but switch behaviour based on the `ROLE` environment variable.
+
+```
+ROLE=manager
+  └─▶ operator_config role  (syncs OperatorConfig CR → own Deployment)
+  └─▶ ensures kube_worker   Deployment exists
+  └─▶ ensures cloudflare_worker Deployment exists
+
+ROLE=kube_worker
+  └─▶ kube_worker role      (reads K8s; creates CloudflareTask CRs)
+
+ROLE=cloudflare_worker
+  └─▶ cloudflare_worker role (claims tasks; calls Cloudflare API)
+```
+
+### Tier diagram
+
+```mermaid
+graph TD
+    subgraph "Tier 1 — Manager"
+        MGR[manager pod<br/>ROLE=manager]
+        MGR -->|watches| OC[CloudflareZeroTrustOperatorConfig CR]
+        MGR -->|patches| SELF[own Deployment]
+        MGR -->|ensures exist| KW_DEP[kube_worker Deployment]
+        MGR -->|ensures exist| CW_DEP[cloudflare_worker Deployment]
+    end
+
+    subgraph "Tier 2 — Kubernetes worker"
+        KW[kube_worker pod<br/>ROLE=kube_worker]
+        KW -->|lists| TENANTS[CloudflareZeroTrustTenant CRs]
+        KW -->|lists| HR[HTTPRoutes]
+        KW -->|reads| SECRETS[API token Secrets]
+        KW -->|reads/writes| CM[State ConfigMaps<br/>cfzt-namespace-name]
+        KW -->|creates| TASK[CloudflareTask CR<br/>phase: Pending]
+        KW -->|reads completed tasks| TASK
+        KW -->|writes IDs back| HR
+    end
+
+    subgraph "Tier 3 — Cloudflare worker"
+        CW[cloudflare_worker pod<br/>ROLE=cloudflare_worker]
+        CW -->|claims| TASK
+        CW -->|calls| CFAPI[Cloudflare REST API]
+        CFAPI --> TUNNEL[Tunnel ingress rule]
+        CFAPI --> DNS[DNS CNAME / A record]
+        CFAPI --> ACCESS[Access Application + Policy]
+        CFAPI --> TOKEN[Service Token]
+        CW -->|writes result IDs| TASK
+    end
+
+    KW_DEP -.spawns.-> KW
+    CW_DEP -.spawns.-> CW
+```
+
+### CloudflareTask CRD — the decoupling mechanism
+
+`CloudflareTask` is an internal work-queue CR. It decouples the Kubernetes-watching concern (Tier 2) from the Cloudflare API calling concern (Tier 3).
+
+**Lifecycle**:
+
+```
+Created (no status)
+    │
+    ▼
+Pending          ← kube_worker sets this after creation
+    │
+    ▼
+InProgress       ← cloudflare_worker claims task, writes its pod name
+    │
+    ├──▶ Completed  ← result IDs stored in status; kube_worker writes back to HTTPRoute
+    └──▶ Failed     ← error message in status; kube_worker retries next cycle
+```
+
+**Change detection** (kube_worker):
+1. SHA256 hash of all `cfzt.cloudflare.com/*` annotations on an HTTPRoute
+2. Compare against hash stored in state ConfigMap `cfzt-{namespace}-{name}`
+3. If match → skip (no changes, no new task created)
+4. If mismatch or ConfigMap absent → create a new `CloudflareTask`
+
+### Environment variables by role
+
+| Variable | manager | kube_worker | cloudflare_worker |
+|---|---|---|---|
+| `ROLE` | `manager` | `kube_worker` | `cloudflare_worker` |
+| `OPERATOR_NAMESPACE` | ✅ | ✅ | ✅ |
+| `POD_NAME` | ✅ | — | ✅ (claim identity) |
+| `WATCH_NAMESPACES` | — | ✅ | — |
+| `POLL_INTERVAL_SECONDS` | ✅ | ✅ | ✅ |
+| `LOG_LEVEL` | ✅ | ✅ | ✅ |
+| `CLOUDFLARE_API_BASE` | — | ✅ | ✅ |
+
+---
+
 ## Runtime Architecture
 
-### Container Runtime Flow
+### Three-pod runtime flow
 
 ```mermaid
 sequenceDiagram
-    participant K8s as Kubernetes
-    participant Pod as Operator Pod
-    participant Entry as entrypoint.sh
-    participant PollLoop as Reconciliation Loop
-    participant Ansible as Ansible Playbook
-    
-    K8s->>Pod: Start Container
-    Pod->>Entry: Execute entrypoint.sh
-    Entry->>Entry: Set Environment Variables
-    Entry->>Entry: Configure Ansible
-    Entry->>PollLoop: Start Infinite Loop
-    
-    loop Every POLL_INTERVAL_SECONDS
-        PollLoop->>Ansible: ansible-playbook reconcile.yml
-        Ansible->>Ansible: List Tenants
-        Ansible->>Ansible: List HTTPRoutes
-        Ansible->>Ansible: Reconcile Each Tenant
-        Ansible-->>PollLoop: Return (success/failure)
-        PollLoop->>PollLoop: Log Result
-        PollLoop->>PollLoop: Sleep POLL_INTERVAL_SECONDS
+    participant MGR as manager pod
+    participant KW as kube_worker pod
+    participant CW as cloudflare_worker pod
+    participant K8s as Kubernetes API
+    participant CFAPI as Cloudflare API
+
+    loop Every POLL_INTERVAL_SECONDS (manager)
+        MGR->>K8s: Get OperatorConfig CR
+        MGR->>K8s: Patch own Deployment if config changed
+        MGR->>K8s: Ensure kube_worker Deployment exists
+        MGR->>K8s: Ensure cloudflare_worker Deployment exists
     end
-    
-    Note over PollLoop: Continues until SIGTERM/SIGINT
+
+    loop Every POLL_INTERVAL_SECONDS (kube_worker)
+        KW->>K8s: List CloudflareZeroTrustTenant CRs
+        KW->>K8s: List HTTPRoutes (filtered by cfzt/enabled)
+        KW->>K8s: Read state ConfigMaps (annotation hashes)
+        KW->>K8s: Create CloudflareTask CRs for changed HTTPRoutes
+        KW->>K8s: Read Completed CloudflareTask CRs
+        KW->>K8s: Write Cloudflare IDs back to HTTPRoute annotations
+        KW->>K8s: Delete processed tasks + cleanup orphaned ConfigMaps
+    end
+
+    loop Every POLL_INTERVAL_SECONDS (cloudflare_worker)
+        CW->>K8s: List Pending CloudflareTask CRs
+        CW->>K8s: Claim task (patch phase → InProgress)
+        CW->>CFAPI: Write tunnel hostname route
+        CW->>CFAPI: Create CNAME / A DNS record
+        CW->>CFAPI: Create Access Application
+        CW->>CFAPI: Attach policy / create service token
+        CW->>K8s: Patch task phase → Completed (with result IDs)
+    end
 ```
+
+### Container Runtime Flow
 
 ### Entrypoint Script Responsibilities
 

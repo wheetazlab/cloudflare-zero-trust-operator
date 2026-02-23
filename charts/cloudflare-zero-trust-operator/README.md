@@ -6,10 +6,22 @@ Installs the **Cloudflare Zero Trust Operator** — an Ansible-based Kubernetes 
 
 The operator container ships Ansible roles internally. The Helm chart's job is to:
 
-1. Install the three CRDs (from `crds/` — Helm applies these before any templates)
+1. Install the four CRDs (from `crds/` — Helm applies these before any templates)
 2. Create the namespace, ServiceAccount, and ClusterRole/ClusterRoleBinding
-3. Deploy the operator container with runtime configuration via environment variables
+3. Deploy the **manager** container (`ROLE=manager`) with runtime configuration via environment variables
 4. Optionally create the `CloudflareZeroTrustTenant` CR (and its API token Secret) if `tenant.create=true`
+
+### Three-tier deployment
+
+After the manager pod starts, it creates two additional worker Deployments in the same namespace:
+
+| Pod | `ROLE` env | Responsibility |
+|-----|-----------|----------------|
+| **manager** | `manager` | Watches `CloudflareZeroTrustOperatorConfig` CR; applies self-updates; keeps worker Deployments alive |
+| **kube_worker** | `kube_worker` | Lists HTTPRoutes + Tenants; detects annotation changes; creates `CloudflareTask` CRs |
+| **cloudflare_worker** | `cloudflare_worker` | Claims `CloudflareTask` CRs; executes all Cloudflare REST API calls; writes result IDs back |
+
+`CloudflareTask` is an internal CRD that acts as a work queue between the two workers, decoupling Kubernetes API access from Cloudflare API calls.
 
 ---
 

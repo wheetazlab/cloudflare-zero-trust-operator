@@ -46,6 +46,9 @@ rules:
     verbs: ["get", "list", "watch", "patch", "update"]
   # Core resources
   - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: [""]

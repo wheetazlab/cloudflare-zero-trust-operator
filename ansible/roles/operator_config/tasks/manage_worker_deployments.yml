@@ -8,6 +8,11 @@
 # Deployments with ROLE overrides.  This guarantees the three tiers always
 # run the same image without requiring separate image values.
 #
+# Image propagation: the manager reads its own running image digest from pod
+# status and stamps it as cfzt.cloudflare.com/image-digest on worker pod
+# templates. When a new image is pushed and the manager restarts, the digest
+# changes, which triggers an automatic Kubernetes rollout of the workers.
+#
 # Variables:
 #   - operator_namespace
 #   - operator_config (optional – OperatorConfig CR)
@@ -34,6 +39,32 @@
         mgr_pod_spec: "{{ manager_deployment_info.resources[0].spec.template.spec }}"
         mgr_replicas: "{{ manager_deployment_info.resources[0].spec.replicas }}"
         mgr_labels: "{{ manager_deployment_info.resources[0].spec.template.metadata.labels }}"
+
+    - name: "Worker Deployments | Get manager Pod to read running image digest"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ operator_namespace }}"
+        label_selectors:
+          - "app.kubernetes.io/name=cloudflare-zero-trust-operator"
+          - "app.kubernetes.io/instance=cloudflare-zero-trust-operator"
+        field_selectors:
+          - "status.phase=Running"
+      register: manager_pod_info
+
+    - name: "Worker Deployments | Extract image digest from running manager pod"
+      ansible.builtin.set_fact:
+        mgr_image_digest: >-
+          {{
+            manager_pod_info.resources
+            | selectattr('spec.containers', 'defined')
+            | map(attribute='status.containerStatuses')
+            | flatten
+            | selectattr('name', 'equalto', 'operator')
+            | map(attribute='imageID')
+            | first
+            | default(mgr_container.image)
+          }}
 
     - name: "Worker Deployments | Build base env list (shared between workers)"
       ansible.builtin.set_fact:
@@ -70,6 +101,8 @@
             template:
               metadata:
                 labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'kube-worker'}) }}"
+                annotations:
+                  cfzt.cloudflare.com/image-digest: "{{ mgr_image_digest }}"
               spec:
                 serviceAccountName: "{{ mgr_pod_spec.serviceAccountName }}"
                 securityContext: "{{ mgr_pod_spec.securityContext | default({}) }}"
@@ -119,6 +152,8 @@
             template:
               metadata:
                 labels: "{{ mgr_labels | combine({'app.kubernetes.io/component': 'cloudflare-worker'}) }}"
+                annotations:
+                  cfzt.cloudflare.com/image-digest: "{{ mgr_image_digest }}"
               spec:
                 serviceAccountName: "{{ mgr_pod_spec.serviceAccountName }}"
                 securityContext: "{{ mgr_pod_spec.securityContext | default({}) }}"
@@ -148,3 +183,4 @@
           - "kube_worker Deployment: cloudflare-zero-trust-kube-worker"
           - "cloudflare_worker Deployment: cloudflare-zero-trust-cloudflare-worker"
           - "Image: {{ mgr_container.image }}"
+          - "Digest: {{ mgr_image_digest | truncate(80) }}"

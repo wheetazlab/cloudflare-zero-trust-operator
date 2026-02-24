@@ -1,5 +1,3 @@
 theme: jekyll-theme-tactile
 title: Cloudflare Zero Trust Operator
 description: Kubernetes operator that manages Cloudflare Zero Trust tunnel routing via HTTPRoute resources
-exclude:
-  - index.yaml

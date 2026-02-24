@@ -128,6 +128,14 @@ rbac:
 # ALL fields marked "Required when create=true" MUST be supplied —
 # the chart will fail at render time if any are missing.
 # -------------------------------------------------------------------
+# Set to false to skip deploying the example CloudflareZeroTrustTemplate CRs into the
+# operator namespace. Templates are installed by default as a starter set.
+# They are labelled cfzt.cloudflare.com/example: "true" for easy cleanup:
+#   kubectl delete cfzttemplate -l cfzt.cloudflare.com/example=true
+exampleTemplates:
+  install: true
+
+# -------------------------------------------------------------------
 tenant:
   # Set to true to create the Tenant CR and API token Secret.
   # Nothing is rendered when this is false.
@@ -171,17 +179,3 @@ tenant:
     name: ""
     key: "token"
 
-  # Default values applied to every managed resource under this tenant.
-  # All of these are optional.
-  defaults:
-    sessionDuration: "24h"
-    # Origin service URL — scheme determines service type:
-    #   http://   plain HTTP    tcp://   raw TCP
-    #   https://  HTTPS (TLS)  unix://  Unix socket
-    originService: ""
-    httpRedirect: true
-    originTLS:
-      noTLSVerify: true
-      tlsTimeout: 10
-      http2Origin: false
-      matchSNIToHost: false

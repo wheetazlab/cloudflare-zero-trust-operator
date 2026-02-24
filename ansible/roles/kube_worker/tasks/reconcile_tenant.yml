@@ -17,7 +17,27 @@
     tenant_tunnel_id: "{{ tenant.spec.tunnelId }}"
     tenant_zone_id: "{{ tenant.spec.zoneId | default('') }}"
     tenant_credential_ref: "{{ tenant.spec.credentialRef }}"
-    tenant_defaults: "{{ tenant.spec.defaults | default({}) }}"
+
+# Base template is discovered by convention — no field on the tenant CR.
+# If a template named "base-<tenant-name>" exists in the tenant namespace it is
+# loaded first. Per-route templates override it; annotation overrides win last.
+- name: Look up base template by convention (base-{{ tenant_name }})
+  kubernetes.core.k8s_info:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareZeroTrustTemplate
+    name: "base-{{ tenant_name }}"
+    namespace: "{{ tenant_namespace }}"
+  register: base_template_result
+
+- name: Set base_template_spec from discovered template
+  ansible.builtin.set_fact:
+    base_template_spec: "{{ base_template_result.resources[0].spec }}"
+  when: base_template_result.resources | length > 0
+
+- name: Set empty base_template_spec when no base template found
+  ansible.builtin.set_fact:
+    base_template_spec: {}
+  when: base_template_result.resources | length == 0
 
 - name: Display tenant reconciliation start
   ansible.builtin.debug:

@@ -67,54 +67,6 @@ spec:
                       type: string
                       description: Key in the Secret containing the API token
                       default: token
-                defaults:
-                  type: object
-                  description: Default values for managed resources
-                  properties:
-                    sessionDuration:
-                      type: string
-                      description: Default session duration for Access Applications
-                      default: "24h"
-                      pattern: ^\d+[smh]$
-                    originService:
-                      type: string
-                      description: Default origin service URL (scheme auto-detected for HTTP/HTTPS)
-                      default: ""
-                    httpHostHeader:
-                      type: string
-                      description: HTTP Host header to send to origin
-                    originTLS:
-                      type: object
-                      description: TLS settings for origin connections
-                      properties:
-                        noTLSVerify:
-                          type: boolean
-                          description: Disable TLS verification of origin certificate
-                          default: false
-                        originServerName:
-                          type: string
-                          description: Hostname that cloudflared should expect from origin server certificate (SNI)
-                        caPool:
-                          type: string
-                          description: Path to CA certificate for origin (if not Cloudflare-signed)
-                        tlsTimeout:
-                          type: integer
-                          description: Timeout in seconds for completing TLS handshake to origin
-                          default: 10
-                          minimum: 1
-                          maximum: 300
-                        http2Origin:
-                          type: boolean
-                          description: Use HTTP/2 to connect to origin (requires HTTPS)
-                          default: false
-                        matchSNIToHost:
-                          type: boolean
-                          description: Automatically set SNI to match incoming request hostname
-                          default: false
-                    httpRedirect:
-                      type: boolean
-                      description: Enable HTTP to HTTPS redirect
-                      default: true
                 logLevel:
                   type: string
                   description: Log level for reconciliation of this tenant (DEBUG, INFO, WARNING, ERROR)

@@ -78,12 +78,13 @@ spec:
                       default: "24h"
                       description: "Session duration (e.g., 24h, 8h, 30m)"
                     
-                    # Reference existing policies instead of creating them
-                    existingPolicyIds:
+                    # Reference existing policies by name — the operator resolves names to UUIDs
+                    # by querying the Cloudflare account before configuring the Access Application.
+                    existingPolicyNames:
                       type: array
                       items:
                         type: string
-                      description: "List of existing Access Policy IDs to attach (operator won't create policies)"
+                      description: "List of existing Access Policy names to attach (operator resolves names to UUIDs at reconcile time)"
                     
                     # Access Application settings from Cloudflare API
                     autoRedirectToIdentity:

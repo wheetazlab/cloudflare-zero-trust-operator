@@ -159,16 +159,11 @@ tenant:
   #   name: "my-cf-token-secret"
   #   key: "token"
 
-  defaults:
-    sessionDuration: "24h"
-    originService: "http://traefik.traefik.svc.cluster.local:80"
-    httpRedirect: true
-    originTLS:
-      noTLSVerify: true
-      tlsTimeout: 10
-      http2Origin: false
-      matchSNIToHost: false
+exampleTemplates:
+  install: true   # set false to skip deploying the starter CloudflareZeroTrustTemplate CRs
 ```
+
+> **Tip:** Origin URL, TLS settings, and Access defaults are configured in a `CloudflareZeroTrustTemplate` named `base-<tenant-instanceName>` rather than on the tenant CR itself. After installing the operator, create a base template named `base-<your-instanceName>` to set the origin service URL and TLS settings that should apply to all routes. See [examples-templates.md](../../docs/examples-templates.md).
 
 Install with the values file:
 
@@ -221,7 +216,25 @@ LoadBalancer IP — without routing traffic through a tunnel — use a dns-only 
 - `tenant.zoneId` **must** be set on the `CloudflareZeroTrustTenant`
 - API token needs the additional **Zone: DNS: Edit** permission (see above)
 
-### Template: static IP
+### Template: per-route IP (recommended)
+
+Supply the target IP per-route via the `cfzt.cloudflare.com/dnsIp` annotation — keeping the template reusable across routes. The operator validates the IP is an RFC 1918 private address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and rejects public addresses.
+
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: internal-dnsonly
+  namespace: cloudflare-zero-trust
+spec:
+  dnsOnly:
+    enabled: true
+    proxied: false
+    ttl: 120
+    # staticIp is intentionally absent — supply cfzt.cloudflare.com/dnsIp on each HTTPRoute
+```
+
+### Template: static IP (single-destination)
 
 ```yaml
 apiVersion: cfzt.cloudflare.com/v1alpha1
@@ -230,7 +243,6 @@ metadata:
   name: internal-static
   namespace: cloudflare-zero-trust
 spec:
-  tenantRef: prod-tenant   # tenant must have zoneId set
   dnsOnly:
     enabled: true
     staticIp: "192.168.10.100"   # your MetalLB VIP or fixed cluster IP
@@ -247,7 +259,6 @@ metadata:
   name: internal-auto
   namespace: cloudflare-zero-trust
 spec:
-  tenantRef: prod-tenant
   dnsOnly:
     enabled: true
     ingressServiceRef:
@@ -267,9 +278,10 @@ metadata:
   namespace: default
   annotations:
     cfzt.cloudflare.com/enabled: "true"
-    cfzt.cloudflare.com/tenant: "prod-tenant"
-    cfzt.cloudflare.com/template: "internal-static"   # or internal-auto
     cfzt.cloudflare.com/hostname: "ha.internal.example.com"
+    cfzt.cloudflare.com/tenant: "prod-tenant"             # tenant must have zoneId set
+    cfzt.cloudflare.com/template: "internal-dnsonly"     # or internal-static / internal-auto
+    cfzt.cloudflare.com/dnsIp: "192.168.10.100"          # RFC 1918 only; omit when template has staticIp or ingressServiceRef
 spec:
   parentRefs:
     - name: default
@@ -317,38 +329,61 @@ spec:
   credentialRef:
     name: prod-tenant-api-token
     key: token
-  logLevel: INFO
-  defaults:
-    sessionDuration: "24h"
-    originService: "http://traefik.traefik.svc.cluster.local:80"
+```
+
+### 2a. Create the base template
+
+Origin URL, TLS, and default Access settings live in a `CloudflareZeroTrustTemplate` named `base-<tenant-name>`. The operator discovers it automatically — no field on the tenant CR is needed.
+
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: base-prod-tenant   # must be base-<tenant-name>
+  namespace: cloudflare-zero-trust
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
     httpRedirect: true
     originTLS:
       noTLSVerify: true
       tlsTimeout: 10
-      http2Origin: false
-      matchSNIToHost: false
+  accessApplication:
+    enabled: false
+  serviceToken:
+    enabled: false
 ```
+
+If `exampleTemplates.install: true` (the default), the chart deploys a full starter set. Copy and rename `base-mytenant` to get started quickly.
 
 ### 3. Annotate HTTPRoutes
 
-The operator watches `HTTPRoute` resources that carry the tenant annotation:
+The operator watches `HTTPRoute` resources that carry the `cfzt.cloudflare.com/enabled: "true"` annotation:
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: my-app
-  namespace: default
+  namespace: my-app
   annotations:
-    cfzt.cloudflare.com/tenant: prod-tenant
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/hostname: "my-app.example.com"   # public hostname (required)
+    cfzt.cloudflare.com/tenant: "prod-tenant"            # must match Tenant CR name
+    cfzt.cloudflare.com/template: "protected-adauth"    # optional — selects a CloudflareZeroTrustTemplate
 spec:
   parentRefs:
-    - name: my-gateway
+    - name: default
+      namespace: my-app
+  hostnames:
+    - "my-app.example.com"
   rules:
     - backendRefs:
-        - name: my-app-svc
+        - name: my-app
           port: 8080
 ```
+
+See [examples-httproutes.md](../../docs/examples-httproutes.md) for the full annotation reference and more examples.
 
 ---
 
@@ -427,17 +462,13 @@ All of these are ignored when `tenant.create=false` (the default).
 | `tenant.apiToken` | `""` | **yes\*** | Inline API token — Helm creates a `<instanceName>-api-token` Secret |
 | `tenant.existingSecret.name` | `""` | **yes\*** | Name of a pre-existing Secret containing the token |
 | `tenant.existingSecret.key` | `"token"` | no | Key inside the existing Secret |
-| `tenant.defaults.sessionDuration` | `"24h"` | no | Default Access session duration |
-| `tenant.defaults.originService` | `""` | no | Default origin URL (scheme determines service type) |
-| `tenant.defaults.httpRedirect` | `true` | no | Redirect HTTP→HTTPS at the Cloudflare edge |
-| `tenant.defaults.originTLS.noTLSVerify` | `true` | no | Skip TLS verification on origin connection |
-| `tenant.defaults.originTLS.tlsTimeout` | `10` | no | TLS handshake timeout in seconds |
-| `tenant.defaults.originTLS.http2Origin` | `false` | no | Enable HTTP/2 to origin |
-| `tenant.defaults.originTLS.matchSNIToHost` | `false` | no | Match SNI to the Host header |
+| `exampleTemplates.install` | `true` | no | Deploy the starter `CloudflareZeroTrustTemplate` CRs (opt-out with `false`) |
 
 \* Exactly one of `tenant.apiToken` or `tenant.existingSecret.name` must be provided.
 
 † `tenant.zoneId` is optional but required for fully automatic DNS management. Without it the operator logs a warning and DNS records must be created manually.
+
+> **Note:** Origin URL, TLS settings, and Access defaults are no longer configured on the tenant CR. Set them in a `CloudflareZeroTrustTemplate` named `base-<tenant.instanceName>`. See [Configuration hierarchy](#base-template-and-configuration-hierarchy).
 
 ---
 
@@ -454,31 +485,47 @@ Represents a Cloudflare account + tunnel. All namespace-scoped resources referen
 | `spec.credentialRef.name` | ✓ | Name of the Secret holding the API token |
 | `spec.credentialRef.key` | | Key inside the Secret (default: `token`) |
 | `spec.zoneId` | | Cloudflare Zone ID — required for automatic DNS management (CNAME in tunnel mode, A record in dns-only mode) |
-| `spec.logLevel` | | Per-tenant log level override |
-| `spec.defaults.sessionDuration` | | Default Access session duration (default: `24h`) |
-| `spec.defaults.originService` | | Default origin service URL |
-| `spec.defaults.httpRedirect` | | Redirect HTTP→HTTPS at the edge |
-| `spec.defaults.originTLS.noTLSVerify` | | Skip TLS verification on origin connection |
-| `spec.defaults.originTLS.tlsTimeout` | | TLS handshake timeout (seconds) |
-| `spec.defaults.originTLS.http2Origin` | | Enable HTTP/2 to origin |
-| `spec.defaults.originTLS.matchSNIToHost` | | Match SNI to the Host header |
+
+> Origin URL, TLS settings, and Access defaults are configured in a `CloudflareZeroTrustTemplate` named `base-<tenant-name>`, not on the tenant CR. See [Base template and configuration hierarchy](#base-template-and-configuration-hierarchy).
 
 ### CloudflareZeroTrustTemplate
 
-Reusable configuration template that `HTTPRoute` resources can reference to avoid repeating Access / service-token settings.
+Reusable configuration template that `HTTPRoute` resources reference via `cfzt.cloudflare.com/template`. Templates are merged in order: `base-<tenant-name>` → per-route template → per-route annotation overrides.
 
 | Field | Description |
 |-------|-------------|
-| `spec.tenantRef` | Default tenant name for HTTPRoutes using this template |
-| `spec.originService.*` | Origin URL and TLS settings (tunnel mode) |
-| `spec.accessApplication.*` | Access Application settings (enabled, sessionDuration, policies, etc.) — tunnel mode only |
-| `spec.serviceToken.*` | Service token settings (enabled, duration) — tunnel mode only |
-| `spec.dnsOnly.enabled` | `false` — set to `true` to enable dns-only mode |
-| `spec.dnsOnly.staticIp` | Static IPv4 address for the A record; takes precedence over `ingressServiceRef` |
+| `spec.originService.url` | Origin service URL (typically set only in `base-<tenant-name>`) |
+| `spec.originService.httpRedirect` | Redirect HTTP→HTTPS at the Cloudflare edge |
+| `spec.originService.originTLS.*` | TLS settings for origin connection (noTLSVerify, tlsTimeout, http2Origin, matchSNIToHost) |
+| `spec.accessApplication.enabled` | Create a Cloudflare Access Application for this route |
+| `spec.accessApplication.sessionDuration` | Access session duration (e.g. `24h`) |
+| `spec.accessApplication.existingPolicyNames` | Cloudflare Access policy names — resolved to UUIDs at reconcile time |
+| `spec.accessApplication.autoRedirectToIdentity` | Auto-redirect to IdP login |
+| `spec.accessApplication.appLauncherVisible` | Show in Cloudflare App Launcher |
+| `spec.accessApplication.serviceAuth401Redirect` | Return HTTP 401 instead of browser redirect (M2M/API consumers) |
+| `spec.accessApplication.skipInterstitial` | Skip the Access interstitial page |
+| `spec.accessApplication.httpOnlyCookieAttribute` | Set HttpOnly on Access cookies |
+| `spec.accessApplication.sameSiteCookieAttribute` | SameSite cookie value (`none` / `lax` / `strict`) |
+| `spec.serviceToken.enabled` | Create a service token for machine-to-machine auth |
+| `spec.serviceToken.duration` | Service token lifetime (default: `8760h`) |
+| `spec.dnsOnly.enabled` | `false` — set to `true` to create a DNS A record only (no tunnel) |
+| `spec.dnsOnly.staticIp` | Static IPv4 address for the A record; takes precedence over `ingressServiceRef` and `dnsIp` annotation |
 | `spec.dnsOnly.ingressServiceRef.name` | Kubernetes Service to read LoadBalancer IP from |
 | `spec.dnsOnly.ingressServiceRef.namespace` | Namespace of that Service (defaults to the HTTPRoute namespace) |
 | `spec.dnsOnly.proxied` | `false` — enable Cloudflare proxy (unusual for internal routes) |
 | `spec.dnsOnly.ttl` | `120` — DNS record TTL in seconds |
+
+#### Base template and configuration hierarchy
+
+Create a template named `base-<tenant-name>` (e.g. `base-prod-tenant`) to set origin and TLS defaults for every route under a tenant. The operator discovers it by naming convention — no field on the tenant CR is needed.
+
+Merge order:
+
+```
+base-<tenant-name>  →  per-route template  →  annotation overrides
+```
+
+Fields not specified at a higher level are inherited from lower levels. See [examples-templates.md](../../docs/examples-templates.md) for full template definitions.
 
 ### CloudflareZeroTrustOperatorConfig
 

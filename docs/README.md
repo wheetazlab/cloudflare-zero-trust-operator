@@ -69,80 +69,76 @@ Only specify what's unique to each route:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: longhorn
+  name: my-app
+  namespace: my-app
   annotations:
     # Enable operator management
     cfzt.cloudflare.com/enabled: "true"
     
     # Public hostname (REQUIRED)
-    cfzt.cloudflare.com/hostname: "longhorn.wheethome.com"
+    cfzt.cloudflare.com/hostname: "my-app.example.com"
     
-    # Template to use (optional, defaults to 'default')
-    cfzt.cloudflare.com/template: "secure-internal-app"
+    # Template to use (optional)
+    cfzt.cloudflare.com/template: "protected-adauth"
     
-    # Tenant to use (optional if only one tenant in namespace)
-    cfzt.cloudflare.com/tenant: "prod-tenant"
+    # Tenant to use (required)
+    cfzt.cloudflare.com/tenant: "my-tenant"
 spec:
-  # ... Gateway API routing config ...
+  parentRefs:
+    - name: default
+      namespace: my-app
+  hostnames:
+    - "my-app.example.com"
+  rules:
+    - backendRefs:
+        - name: my-app
+          port: 8080
 ```
 
 #### Step 2: Template Definition
 
-Create reusable templates with full configuration:
+Create reusable templates with full configuration. The operator resolves policy names to UUIDs at reconcile time — no need to look them up manually.
 
 ```yaml
 apiVersion: cfzt.cloudflare.com/v1alpha1
 kind: CloudflareZeroTrustTemplate
 metadata:
-  name: secure-internal-app
-  namespace: default
+  name: protected-adauth
+  namespace: cloudflare-zero-trust-operator
 spec:
-  # Origin service settings
-  originService:
-    url: "https://traefik.traefik.svc.cluster.local:443"
-    httpRedirect: true
-    originTLS:
-      noTLSVerify: true  # Self-signed certs in cluster
-      tlsTimeout: 10
-  
-  # Access Application settings
   accessApplication:
     enabled: true
     sessionDuration: "24h"
-    
-    # Use existing policies created in Cloudflare UI
-    existingPolicyIds:
-      - "73badfbd-c825-4bf3-a543-e2882627969d"  # Your ADAUTH policy
-    
-    # Application settings
-    autoRedirectToIdentity: false
+    existingPolicyNames:
+      - "ADAUTH"   # Cloudflare Access policy name — resolved to UUID at reconcile time
+    autoRedirectToIdentity: true
     appLauncherVisible: true
     skipInterstitial: false
+    httpOnlyCookieAttribute: true
+    sameSiteCookieAttribute: "lax"
 ```
 
 ### Configuration Hierarchy
 
-Settings are resolved in this order:
+Settings are resolved through a **three-way merge**:
 
-1. **Template** - Defines all configuration (origin TLS, Access application, service tokens)
-2. **Tenant defaults** - Fallback for any settings not in template
-3. **Default values** - Built-in defaults if not in template or tenant
+1. **Base template** (`base-<tenant-name>`) — auto-discovered by the operator; establishes origin/TLS defaults for every route under a tenant. Create a template named `base-<your-tenant-name>` and the operator picks it up automatically — no field on the tenant CR is needed.
+2. **Per-route template** — referenced via `cfzt.cloudflare.com/template`; only fields specified here override the base.
+3. **Annotation overrides** — fields set directly on the HTTPRoute that override both templates.
 
-Templates are **not overridable** by HTTPRoute annotations - annotations only select tenant and template.
+### Example Templates
 
-### Built-in Templates
-
-The operator includes several templates:
+The operator ships example templates (installed by the Helm chart when `exampleTemplates.install: true`):
 
 | Template Name | Description | Use Case |
 |---------------|-------------|----------|
-| `default` | Public tunnel route with HTTPS origin | Basic public applications |
-| `secure-internal-app` | Access app with existing Azure AD policy | Internal tools requiring authentication |
-| `grpc-backend` | HTTP/2 enabled for gRPC | gRPC services |
-| `api-with-service-token` | Service token for machine-to-machine auth | APIs and webhooks |
-| `admin-panel` | Short session, strict security settings | Administrative interfaces |
+| `base-<tenant-name>` | Origin/TLS baseline for all routes | Every tenant needs one — name must match `base-<tenant-name>` |
+| `protected-adauth` | Identity-based auth via existing Access policy | Human/browser consumers (IdP login) |
+| `unprotected-public` | No Access gate | Intentionally public services |
+| `protected-service-cred` | M2M auth via service credential policy | APIs and CLI consumers |
+| `internal-dnsonly` | DNS A record only, no tunnel | Point hostname at private cluster IP |
 
-See [examples/templates.yaml](../examples/templates.yaml) for complete template definitions.
+See [examples-templates.md](examples-templates.md) for complete template definitions.
 
 ### Core Annotations
 
@@ -150,9 +146,29 @@ See [examples/templates.yaml](../examples/templates.yaml) for complete template 
 |------------|----------|-------------|---------|
 | `cfzt.cloudflare.com/enabled` | Yes | Enable operator management | `"true"` |
 | `cfzt.cloudflare.com/hostname` | Yes | Public hostname to configure | `"app.example.com"` |
-| `cfzt.cloudflare.com/template` | No | Template name (default: `"default"`) | `"secure-internal-app"` |
-| `cfzt.cloudflare.com/tenant` | No | Tenant name (default: only tenant in namespace) | `"prod-tenant"` |
-| `cfzt.cloudflare.com/tunnelId` | No | Override tunnel ID (default: from tenant) | `"uuid"` |
+| `cfzt.cloudflare.com/tenant` | Yes | Name of the `CloudflareZeroTrustTenant` CR | `"my-tenant"` |
+| `cfzt.cloudflare.com/template` | No | Template name | `"protected-adauth"` |
+| `cfzt.cloudflare.com/dnsIp` | No | Private RFC 1918 IP for `internal-dnsonly` routes | `"192.168.1.50"` |
+
+### Annotation Overrides
+
+HTTPRoute annotations can override any field from the merged template for that specific route:
+
+| Annotation | Description |
+|---|---|
+| `cfzt.cloudflare.com/origin.url` | Override origin URL |
+| `cfzt.cloudflare.com/origin.noTLSVerify` | Override TLS verification skip |
+| `cfzt.cloudflare.com/access.enabled` | Override Access Application enabled flag |
+| `cfzt.cloudflare.com/access.existingPolicyNames` | Comma-separated policy names |
+| `cfzt.cloudflare.com/access.sessionDuration` | Override session duration |
+| `cfzt.cloudflare.com/access.autoRedirectToIdentity` | Override auto-redirect to IdP |
+| `cfzt.cloudflare.com/access.appLauncherVisible` | Override App Launcher visibility |
+| `cfzt.cloudflare.com/access.serviceAuth401Redirect` | Return 401 instead of browser redirect |
+| `cfzt.cloudflare.com/access.skipInterstitial` | Override interstitial page |
+| `cfzt.cloudflare.com/access.httpOnlyCookieAttribute` | Override HttpOnly cookie flag |
+| `cfzt.cloudflare.com/access.sameSiteCookieAttribute` | Override SameSite cookie value (`none`/`lax`/`strict`) |
+| `cfzt.cloudflare.com/serviceToken.enabled` | Override Service Token enabled flag |
+| `cfzt.cloudflare.com/serviceToken.duration` | Override Service Token duration |
 
 ### State Tracking Annotations (Managed by Operator)
 
@@ -172,13 +188,11 @@ These annotations are set by the operator to track created resources:
 apiVersion: cfzt.cloudflare.com/v1alpha1
 kind: CloudflareZeroTrustTemplate
 metadata:
-  name: secure-internal-app
-  namespace: default
+  name: my-template
+  namespace: cloudflare-zero-trust-operator
 spec:
-  # Optional: Default tenant reference (can be overridden in HTTPRoute)
-  tenantRef: "prod-tenant"
-  
   # Origin service configuration
+  # Typically defined only in the base-<tenant-name> template and inherited by per-route templates.
   originService:
     url: "https://traefik.traefik.svc.cluster.local:443"
     httpRedirect: true  # Auto-redirect HTTP to HTTPS at edge
@@ -195,16 +209,9 @@ spec:
     enabled: true
     sessionDuration: "24h"
     
-    # Reference existing policies (operator won't create policies)
-    existingPolicyIds:
-      - "policy-id-1"
-      - "policy-id-2"
-    
-    # OR create simple policies (backward compatible)
-    # allowEmails:
-    #   - "user@example.com"
-    # allowGroups:
-    #   - "Engineering"
+    # Policy names — operator resolves to UUIDs at reconcile time
+    existingPolicyNames:
+      - "My Policy Name"
     
     # Application settings
     autoRedirectToIdentity: false
@@ -214,7 +221,7 @@ spec:
     logoUrl: ""
     skipInterstitial: false
     appLauncherVisible: true
-    serviceAuth401Redirect: false  # Return 401 instead of redirect
+    serviceAuth401Redirect: false  # Return 401 instead of browser redirect for M2M consumers
     customDenyMessage: ""
     customDenyUrl: ""
     customNonIdentityDenyUrl: ""
@@ -223,6 +230,13 @@ spec:
   serviceToken:
     enabled: false
     duration: "8760h"  # 1 year
+
+  # DNS-only record (no tunnel) — supply target IP via cfzt.cloudflare.com/dnsIp annotation per route
+  dnsOnly:
+    enabled: false
+    proxied: false
+    ttl: 120
+    # staticIp: "192.168.1.50"  # optional; prefer per-route annotation for flexibility
 ```
 
 ### Template Fields
@@ -241,14 +255,23 @@ spec:
 #### accessApplication
 - **enabled** (bool, default: false): Create Cloudflare Access Application
 - **sessionDuration** (string, default: "24h"): Session duration (e.g., "24h", "8h", "30m")
-- **existingPolicyIds** (array of strings): List of existing policy IDs (operator won't create policies)
-- **allowEmails** (array of strings): Email addresses for simple policy (creates policy)
-- **allowGroups** (array of strings): Access Group names for simple policy (creates policy)
-- **Application settings**: See [Cloudflare Access Application API](https://developers.cloudflare.com/) for details
+- **existingPolicyNames** (array of strings): Cloudflare Access policy names — operator resolves to UUIDs at reconcile time
+- **autoRedirectToIdentity** (bool, default: false): Auto-redirect to IdP login
+- **appLauncherVisible** (bool, default: true): Show in Cloudflare App Launcher
+- **skipInterstitial** (bool, default: false): Skip interstitial page
+- **serviceAuth401Redirect** (bool, default: false): Return HTTP 401 instead of browser redirect — use for M2M/API consumers
+- **httpOnlyCookieAttribute** (bool, default: true): Set HttpOnly cookie flag
+- **sameSiteCookieAttribute** (string): Cookie SameSite value (`none`, `lax`, `strict`)
 
 #### serviceToken
 - **enabled** (bool, default: false): Create service token for machine-to-machine auth
 - **duration** (string, default: "8760h"): Token lifetime
+
+#### dnsOnly
+- **enabled** (bool, default: false): Create DNS A record only — no tunnel or Access Application
+- **proxied** (bool, default: false): Proxy traffic through Cloudflare
+- **ttl** (int, default: 120): DNS TTL in seconds
+- **staticIp** (string, optional): Target IP address; alternatively use `cfzt.cloudflare.com/dnsIp` annotation per route. Must be RFC 1918 private address.
 
 ### Example HTTPRoute with Template
 
@@ -256,22 +279,26 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: longhorn
-  namespace: default
+  name: my-app
+  namespace: my-app
   annotations:
     cfzt.cloudflare.com/enabled: "true"
-    cfzt.cloudflare.com/hostname: "longhorn.wheethome.com"
-    cfzt.cloudflare.com/template: "secure-internal-app"
+    cfzt.cloudflare.com/hostname: "my-app.example.com"
+    cfzt.cloudflare.com/tenant: "my-tenant"
+    cfzt.cloudflare.com/template: "protected-adauth"
 spec:
-  entryPoints:
-    - web
-  routes:
-    - match: Host(`myapp.example.com`)
-      kind: Rule
-      services:
-        - name: myapp
+  parentRefs:
+    - name: default
+      namespace: my-app
+  hostnames:
+    - "my-app.example.com"
+  rules:
+    - backendRefs:
+        - name: my-app
           port: 8080
 ```
+
+See [examples-httproutes.md](examples-httproutes.md) for more complete examples including annotation-only and DNS-only routes.
 
 ## CloudflareZeroTrustTenant CRD
 
@@ -281,47 +308,29 @@ spec:
 apiVersion: cfzt.cloudflare.com/v1alpha1
 kind: CloudflareZeroTrustTenant
 metadata:
-  name: prod-tenant
-  namespace: default
+  name: my-tenant
+  namespace: cloudflare-zero-trust-operator
 spec:
-  accountId: "cloudflare-account-id"
-  tunnelId: "default-tunnel-uuid"
-  zoneId: "optional-zone-id"  # optional
+  accountId: "0123456789abcdef0123456789abcdef"
+  tunnelId: "12345678-1234-1234-1234-123456789abc"
+  zoneId: "0123456789abcdef0123456789abcdef"  # optional
   credentialRef:
     name: cloudflare-api-token
     key: token
-  defaults:
-    sessionDuration: "24h"
-    originService: "https://traefik.traefik.svc.cluster.local:443"
-    httpRedirect: true  # Default: auto-redirect HTTP to HTTPS at edge
-    originTLS:
-      noTLSVerify: true  # Skip TLS verification (useful for self-signed certs)
-      originServerName: ""  # Custom SNI hostname (optional)
-      caPool: ""  # Path to CA cert file (optional)
-      tlsTimeout: 10  # TLS handshake timeout in seconds (1-300)
-      http2Origin: false  # Use HTTP/2 for origin connection
-      matchSNIToHost: false  # Match SNI to Host header
 ```
 
 **Spec Fields:**
 
 - **accountId** (required): Cloudflare Account ID
-- **tunnelId** (required): Default Cloudflare Tunnel ID for routes
+- **tunnelId** (required): Cloudflare Tunnel ID
 - **zoneId** (optional): Cloudflare Zone ID (for DNS/zone-specific operations)
-- **credentialRef** (required): Reference to Kubernetes Secret containing API token
+- **credentialRef** (required): Reference to a Kubernetes Secret containing the Cloudflare API token
   - **name**: Secret name
   - **key**: Key within the secret containing the API token
-- **defaults**: Default values for HTTPRoutes (overridable via annotations)
-  - **sessionDuration**: Default Access Application session duration (e.g., "24h", "8h")
-  - **originService**: Default origin service URL (auto-detects HTTP/HTTPS from scheme)
-  - **httpRedirect**: Automatically redirect HTTP to HTTPS at Cloudflare edge (default: true)
-  - **originTLS**: TLS configuration for HTTPS origin connections
-    - **noTLSVerify**: Skip certificate verification (default: false) - useful for self-signed certs
-    - **originServerName**: Custom SNI hostname for TLS handshake (optional)
-    - **caPool**: Path to CA certificate file for validation (optional)
-    - **tlsTimeout**: TLS handshake timeout in seconds, 1-300 (default: 10)
-    - **http2Origin**: Use HTTP/2 for origin connection (default: false) - useful for gRPC
-    - **matchSNIToHost**: Match SNI to Host header automatically (default: false)
+
+Route defaults (origin URL, TLS settings, Access settings) are configured in a **base template** named `base-<tenant-name>` rather than on the tenant CR. See [Configuration Hierarchy](#configuration-hierarchy).
+
+See [example-tenant.md](example-tenant.md) for a complete example.
 
 ### Status
 
@@ -437,32 +446,30 @@ kubectl apply -f config/rbac/
 kubectl apply -f config/deployment/operator.yaml
 ```
 
-4. **Create default templates**:
+4. **Install example templates** (optional — installed automatically if using Helm with `exampleTemplates.install: true`):
 
 ```bash
-# Install built-in templates (default, secure-internal-app, grpc-backend, etc.)
-kubectl apply -f examples/templates.yaml
+# Helm (recommended) — example templates are included and enabled by default
+helm install cloudflare-zero-trust-operator ./charts/cloudflare-zero-trust-operator
+
+# Or apply manually
+kubectl apply -f charts/cloudflare-zero-trust-operator/templates/example-templates.yaml
 ```
+
+   See [examples-templates.md](examples-templates.md) for template definitions and [examples-httproutes.md](examples-httproutes.md) for annotated HTTPRoute examples.
 
 5. **Create a CloudflareZeroTrustTenant**:
 
-```bash
-kubectl apply -f examples/tenant.yaml
-```
+   See [example-tenant.md](example-tenant.md) for a complete example including the required `base-<tenant-name>` template.
 
 6. **Annotate your HTTPRoutes**:
 
 ```bash
-# Simple: Just enable with hostname (uses 'default' template)
 kubectl annotate httproute my-app \
   cfzt.cloudflare.com/enabled="true" \
-  cfzt.cloudflare.com/hostname="myapp.example.com"
-
-# With template: Use a specific template
-kubectl annotate httproute secure-app \
-  cfzt.cloudflare.com/enabled="true" \
-  cfzt.cloudflare.com/hostname="secure.example.com" \
-  cfzt.cloudflare.com/template="secure-internal-app"
+  cfzt.cloudflare.com/hostname="myapp.example.com" \
+  cfzt.cloudflare.com/tenant="my-tenant" \
+  cfzt.cloudflare.com/template="protected-adauth"
 ```
 
 ### Configuration

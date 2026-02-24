@@ -1,0 +1,73 @@
+---
+# Resolve a list of Cloudflare Access policy names to their UUIDs.
+# Queries the account-level reusable policies endpoint and returns a
+# comma-separated string of UUIDs ready to pass to manage_access_app.
+#
+# Variables required:
+#   - cf_api_token:       Cloudflare API token
+#   - cf_account_id:      Cloudflare account ID
+#   - cf_api_base:        Cloudflare API base URL
+#   - cf_policy_names:    List (or comma-separated string) of policy names to resolve
+#
+# Returns:
+#   resolved_policy_ids   Comma-separated UUID string (empty string if input is empty)
+#   unresolved_policy_names  List of names that could not be matched (should be empty)
+
+- name: Skip lookup when no policy names provided
+  ansible.builtin.set_fact:
+    resolved_policy_ids: ""
+    unresolved_policy_names: []
+  when: cf_policy_names | default('') | length == 0
+
+- name: Resolve policy names to UUIDs
+  when: cf_policy_names | default('') | length > 0
+  block:
+    - name: Normalise policy names to a list
+      ansible.builtin.set_fact:
+        _policy_name_list: >-
+          {{ (cf_policy_names if cf_policy_names is iterable and cf_policy_names is not string
+              else cf_policy_names.split(',')) | map('trim') | select | list }}
+
+    - name: Fetch all reusable Access policies for account
+      ansible.builtin.uri:
+        url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/policies"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ cf_api_token }}"
+          Content-Type: "application/json"
+        status_code: [200]
+        return_content: true
+      register: _policy_list_response
+      retries: 3
+      delay: 5
+      until: _policy_list_response.status == 200
+
+    - name: Build name→UUID map from API response
+      ansible.builtin.set_fact:
+        _policy_name_to_id: >-
+          {{ dict(_policy_list_response.json.result
+              | map(attribute='name')
+              | zip(_policy_list_response.json.result | map(attribute='id'))) }}
+
+    - name: Identify any unresolved policy names
+      ansible.builtin.set_fact:
+        unresolved_policy_names: >-
+          {{ _policy_name_list | reject('in', _policy_name_to_id.keys()) | list }}
+
+    - name: Fail if any policy names could not be resolved
+      ansible.builtin.fail:
+        msg: >
+          The following Cloudflare Access policy names were not found in account {{ cf_account_id }}:
+          {{ unresolved_policy_names | join(', ') }}.
+          Available policies: {{ _policy_name_to_id.keys() | list | join(', ') }}
+      when: unresolved_policy_names | length > 0
+
+    - name: Resolve matched names to UUIDs
+      ansible.builtin.set_fact:
+        resolved_policy_ids: >-
+          {{ _policy_name_list | map('extract', _policy_name_to_id) | join(',') }}
+
+    - name: Display resolved policy IDs
+      ansible.builtin.debug:
+        msg: "Resolved policy names {{ _policy_name_list }} → {{ resolved_policy_ids }}"
+        verbosity: 1

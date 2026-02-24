@@ -1,0 +1,164 @@
+{{- if .Values.exampleTemplates.install }}
+{{- $ns := include "cloudflare-zero-trust-operator.namespace" . }}
+---
+# base-<tenant-name>  (example: base-mytenant)
+# Base template — discovered automatically by the operator using the naming convention
+# "base-<tenant-name>". Name this after your tenant; no field on the tenant CR needed.
+#
+# Merge order: base template → per-route template → annotation overrides.
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: base-mytenant  # pattern: base-<tenant-name> — change to match your tenant CR name
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  originService:
+    url: "https://traefik.traefik.svc.cluster.local:443"
+    httpRedirect: true
+    originTLS:
+      noTLSVerify: true
+      tlsTimeout: 10
+      http2Origin: false
+      matchSNIToHost: false
+  accessApplication:
+    enabled: false
+  serviceToken:
+    enabled: false
+
+---
+# protected-adauth
+# Tunnel route protected by an existing Cloudflare Access policy using identity-based auth.
+# Suitable for human/browser consumers that authenticate via an identity provider.
+# originService is intentionally absent — inherited from the base template (base-<tenant-name>).
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: protected-adauth
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  accessApplication:
+    enabled: true
+    sessionDuration: "24h"
+    existingPolicyNames:
+      - "MyIdentityPolicy"  # Replace with your Cloudflare Access policy name
+    autoRedirectToIdentity: true
+    appLauncherVisible: true
+    skipInterstitial: false
+    httpOnlyCookieAttribute: true
+    sameSiteCookieAttribute: "lax"
+
+---
+# unprotected-public
+# Tunnel route with no Cloudflare Access gate.
+# Suitable for intentionally public-facing services.
+# originService is intentionally absent — inherited from the base template (base-<tenant-name>).
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: unprotected-public
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  accessApplication:
+    enabled: false
+
+---
+# protected-service-cred
+# Tunnel route for machine-to-machine access using a non_identity Access policy.
+# No browser/human auth — intended for API and CLI consumers.
+# serviceAuth401Redirect: true returns HTTP 401 instead of a browser redirect.
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: protected-service-cred
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  # Only the fields that differ from the base template are specified here.
+  # base: httpRedirect=true, tlsTimeout=10 — overridden below for API consumers.
+  originService:
+    httpRedirect: false   # base: true — API/CLI consumers must not be redirected at the edge
+    originTLS:
+      tlsTimeout: 15      # base: 10 — slightly longer timeout for service protocol handshakes
+  accessApplication:
+    enabled: true
+    sessionDuration: "24h"
+    existingPolicyNames:
+      - "MyServiceCredPolicy"  # Replace with your Cloudflare Access policy name
+    serviceAuth401Redirect: true
+    appLauncherVisible: false
+    skipInterstitial: true
+    httpOnlyCookieAttribute: true
+    sameSiteCookieAttribute: "none"
+
+---
+# internal-dnsonly
+# Creates a plain Cloudflare DNS A record pointing at a private cluster IP.
+# No tunnel, no Access Application — DNS only.
+# Target IP is supplied per-route via cfzt.cloudflare.com/dnsIp annotation.
+# The operator rejects non-RFC-1918 addresses at reconciliation time.
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTemplate
+metadata:
+  name: internal-dnsonly
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  dnsOnly:
+    enabled: true
+    proxied: false
+    ttl: 120
+
+---
+# Example CloudflareZeroTrustTenant
+# Fill in your Cloudflare account details and credentials, then set tenant.create=true
+# in values.yaml (or via --set) to have the operator manage your routes.
+# The operator automatically discovers the base template named "base-<tenant-name>"
+# (e.g. "base-my-tenant") in the same namespace as the tenant CR.
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTenant
+metadata:
+  name: my-tenant
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+spec:
+  accountId: "0123456789abcdef0123456789abcdef"  # Replace: your 32-char Cloudflare account ID
+  tunnelId: "12345678-1234-1234-1234-123456789abc"  # Replace: your tunnel UUID
+  # zoneId: "0123456789abcdef0123456789abcdef"  # Optional: 32-char zone ID
+  credentialRef:
+    name: example-cloudflare-api-token
+    key: token
+
+---
+# Example Secret for the Cloudflare API token used by the example tenant above.
+# Replace the token value before deploying, or create the Secret manually:
+#   kubectl create secret generic example-cloudflare-api-token \
+#     --from-literal=token=YOUR_TOKEN \
+#     -n {{ $ns }}
+# Required token permissions: Account → Cloudflare Tunnel: Edit, Account → Access: Edit
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-cloudflare-api-token
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
+    cfzt.cloudflare.com/example: "true"
+type: Opaque
+stringData:
+  token: "YOUR_CLOUDFLARE_API_TOKEN_HERE"
+{{- end }}

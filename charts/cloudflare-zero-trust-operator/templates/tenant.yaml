@@ -40,15 +40,4 @@ spec:
     {{- else }}
     {{- fail "Either tenant.apiToken or tenant.existingSecret.name must be set when tenant.create=true" }}
     {{- end }}
-  defaults:
-    sessionDuration: {{ .Values.tenant.defaults.sessionDuration | quote }}
-    {{- if .Values.tenant.defaults.originService }}
-    originService: {{ .Values.tenant.defaults.originService | quote }}
-    {{- end }}
-    httpRedirect: {{ .Values.tenant.defaults.httpRedirect }}
-    originTLS:
-      noTLSVerify: {{ .Values.tenant.defaults.originTLS.noTLSVerify }}
-      tlsTimeout: {{ .Values.tenant.defaults.originTLS.tlsTimeout }}
-      http2Origin: {{ .Values.tenant.defaults.originTLS.http2Origin }}
-      matchSNIToHost: {{ .Values.tenant.defaults.originTLS.matchSNIToHost }}
 {{- end }}

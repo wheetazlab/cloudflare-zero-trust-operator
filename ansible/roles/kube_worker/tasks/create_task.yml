@@ -7,7 +7,7 @@
 # Variables (set by reconcile_tenant.yml):
 #   - httproute: The HTTPRoute resource
 #   - tenant_name / tenant_namespace / tenant_account_id / tenant_tunnel_id
-#   - tenant_zone_id / tenant_credential_ref / tenant_defaults
+#   - tenant_zone_id / tenant_credential_ref / base_template_spec
 #   - api_token: Cloudflare API token (for zone-id resolution only)
 #   - cloudflare_api_base
 #   - operator_namespace
@@ -38,7 +38,10 @@
     # Step 2: Load template
     - name: Get template name from annotation
       ansible.builtin.set_fact:
-        template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', 'default') }}"
+template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
+
+    # Step 2 note: template is optional. Omit cfzt.cloudflare.com/template (or set it to "")
+    # and configure the route entirely with per-route annotation overrides (Step 3b below).
 
     - name: Load CloudflareZeroTrustTemplate
       kubernetes.core.k8s_info:
@@ -47,37 +50,48 @@
         name: "{{ template_name }}"
         namespace: "{{ ir_namespace }}"
       register: template_result
+        when: template_name != ""
 
-    - name: Validate template exists
-      ansible.builtin.fail:
-        msg: "Template '{{ template_name }}' not found in namespace {{ ir_namespace }}"
-      when: template_result.resources | length == 0
+      - name: Validate template exists
+        ansible.builtin.fail:
+          msg: "Template '{{ template_name }}' not found in namespace {{ ir_namespace }}"
+        when: template_name != "" and template_result.resources | length == 0
 
-    - name: Extract template spec
+      - name: Extract template spec
+        ansible.builtin.set_fact:
+          template_spec: "{{ template_result.resources[0].spec }}"
+        when: template_name != ""
+
+      - name: Set empty template spec when no template specified
+        ansible.builtin.set_fact:
+          template_spec: {}
+        when: template_name == ""
+
+      - name: Detect dns-only mode and extract DNS record settings
+        ansible.builtin.set_fact:
+          dns_only_mode: "{{ template_spec.dnsOnly.enabled | default(false) }}"
+          dns_proxied: "{{ template_spec.dnsOnly.proxied | default(false) }}"
+          dns_ttl: "{{ template_spec.dnsOnly.ttl | default(120) | int }}"
+
+    # Step 3a: Merge settings. Order of precedence (highest → lowest):
+    #   annotation overrides (Step 3b) → per-route template → base template → hardcoded defaults
+
+    - name: Merge origin URL and HTTP redirect (template > base template > hardcoded defaults)
       ansible.builtin.set_fact:
-        template_spec: "{{ template_result.resources[0].spec }}"
+        origin_service: "{{ template_spec.originService.url | default(base_template_spec.originService.url | default('')) }}"
+        http_redirect: "{{ template_spec.originService.httpRedirect | default(base_template_spec.originService.httpRedirect | default(true)) }}"
 
-    - name: Detect dns-only mode
+    - name: Merge origin TLS settings (template > base template > hardcoded defaults)
       ansible.builtin.set_fact:
-        dns_only_mode: "{{ template_spec.dnsOnly.enabled | default(false) }}"
+        no_tls_verify: "{{ template_spec.originService.originTLS.noTLSVerify | default(base_template_spec.originService.originTLS.noTLSVerify | default(false)) }}"
+        origin_server_name: "{{ template_spec.originService.originTLS.originServerName | default(base_template_spec.originService.originTLS.originServerName | default('')) }}"
+        ca_pool: "{{ template_spec.originService.originTLS.caPool | default(base_template_spec.originService.originTLS.caPool | default('')) }}"
+        tls_timeout: "{{ template_spec.originService.originTLS.tlsTimeout | default(base_template_spec.originService.originTLS.tlsTimeout | default(10)) | int }}"
+        http2_origin: "{{ template_spec.originService.originTLS.http2Origin | default(base_template_spec.originService.originTLS.http2Origin | default(false)) }}"
+        match_sni_to_host: "{{ template_spec.originService.originTLS.matchSNIToHost | default(base_template_spec.originService.originTLS.matchSNIToHost | default(false)) }}"
+      when: template_spec.originService.originTLS is defined or base_template_spec.originService is defined
 
-    # Step 3: Merge template+tenant settings into task-spec vars
-    - name: Merge origin service settings
-      ansible.builtin.set_fact:
-        origin_service: "{{ template_spec.originService.url | default(tenant_defaults.originService | default('')) }}"
-        http_redirect: "{{ template_spec.originService.httpRedirect | default(tenant_defaults.httpRedirect | default(true)) }}"
-
-    - name: Merge origin TLS settings (template > tenant defaults)
-      ansible.builtin.set_fact:
-        no_tls_verify: "{{ template_spec.originService.originTLS.noTLSVerify | default(tenant_defaults.originTLS.noTLSVerify | default(false) if tenant_defaults.originTLS is defined else false) }}"
-        origin_server_name: "{{ template_spec.originService.originTLS.originServerName | default(tenant_defaults.originTLS.originServerName | default('') if tenant_defaults.originTLS is defined else '') }}"
-        ca_pool: "{{ template_spec.originService.originTLS.caPool | default(tenant_defaults.originTLS.caPool | default('') if tenant_defaults.originTLS is defined else '') }}"
-        tls_timeout: "{{ template_spec.originService.originTLS.tlsTimeout | default(tenant_defaults.originTLS.tlsTimeout | default(10) if tenant_defaults.originTLS is defined else 10) | int }}"
-        http2_origin: "{{ template_spec.originService.originTLS.http2Origin | default(tenant_defaults.originTLS.http2Origin | default(false) if tenant_defaults.originTLS is defined else false) }}"
-        match_sni_to_host: "{{ template_spec.originService.originTLS.matchSNIToHost | default(tenant_defaults.originTLS.matchSNIToHost | default(false) if tenant_defaults.originTLS is defined else false) }}"
-      when: template_spec.originService.originTLS is defined or tenant_defaults.originTLS is defined
-
-    - name: Set default TLS settings when not in template or tenant
+    - name: Set default TLS settings when not in template or base template
       ansible.builtin.set_fact:
         no_tls_verify: false
         origin_server_name: ""
@@ -85,35 +99,35 @@
         tls_timeout: 10
         http2_origin: false
         match_sni_to_host: false
-      when: template_spec.originService.originTLS is not defined and tenant_defaults.originTLS is not defined
+      when: template_spec.originService.originTLS is not defined and base_template_spec.originService is not defined
 
-    - name: Merge Access Application settings
+    - name: Merge Access Application settings (template > base template > hardcoded defaults)
       ansible.builtin.set_fact:
-        create_access_app: "{{ template_spec.accessApplication.enabled | default(false) }}"
-        session_duration: "{{ template_spec.accessApplication.sessionDuration | default(tenant_defaults.sessionDuration | default('24h')) }}"
-        allow_groups: "{{ template_spec.accessApplication.allowGroups | default([]) | join(',') }}"
-        allow_emails: "{{ template_spec.accessApplication.allowEmails | default([]) | join(',') }}"
-        existing_policy_ids: "{{ template_spec.accessApplication.existingPolicyIds | default([]) | join(',') }}"
-        auto_redirect_to_identity: "{{ template_spec.accessApplication.autoRedirectToIdentity | default(false) }}"
-        enable_binding_cookie: "{{ template_spec.accessApplication.enableBindingCookie | default(false) }}"
-        http_only_cookie_attribute: "{{ template_spec.accessApplication.httpOnlyCookieAttribute | default(true) }}"
-        same_site_cookie_attribute: "{{ template_spec.accessApplication.sameSiteCookieAttribute | default('lax') }}"
-        logo_url: "{{ template_spec.accessApplication.logoUrl | default('') }}"
-        skip_interstitial: "{{ template_spec.accessApplication.skipInterstitial | default(false) }}"
-        app_launcher_visible: "{{ template_spec.accessApplication.appLauncherVisible | default(true) }}"
-        service_auth_401_redirect: "{{ template_spec.accessApplication.serviceAuth401Redirect | default(false) }}"
-        custom_deny_message: "{{ template_spec.accessApplication.customDenyMessage | default('') }}"
-        custom_deny_url: "{{ template_spec.accessApplication.customDenyUrl | default('') }}"
-        custom_non_identity_deny_url: "{{ template_spec.accessApplication.customNonIdentityDenyUrl | default('') }}"
-      when: template_spec.accessApplication is defined
+        create_access_app: "{{ template_spec.accessApplication.enabled | default(base_template_spec.accessApplication.enabled | default(false)) }}"
+        session_duration: "{{ template_spec.accessApplication.sessionDuration | default(base_template_spec.accessApplication.sessionDuration | default('24h')) }}"
+        allow_groups: "{{ template_spec.accessApplication.allowGroups | default(base_template_spec.accessApplication.allowGroups | default([])) | join(',') }}"
+        allow_emails: "{{ template_spec.accessApplication.allowEmails | default(base_template_spec.accessApplication.allowEmails | default([])) | join(',') }}"
+        existing_policy_names: "{{ template_spec.accessApplication.existingPolicyNames | default(base_template_spec.accessApplication.existingPolicyNames | default([])) | join(',') }}"
+        auto_redirect_to_identity: "{{ template_spec.accessApplication.autoRedirectToIdentity | default(base_template_spec.accessApplication.autoRedirectToIdentity | default(false)) }}"
+        enable_binding_cookie: "{{ template_spec.accessApplication.enableBindingCookie | default(base_template_spec.accessApplication.enableBindingCookie | default(false)) }}"
+        http_only_cookie_attribute: "{{ template_spec.accessApplication.httpOnlyCookieAttribute | default(base_template_spec.accessApplication.httpOnlyCookieAttribute | default(true)) }}"
+        same_site_cookie_attribute: "{{ template_spec.accessApplication.sameSiteCookieAttribute | default(base_template_spec.accessApplication.sameSiteCookieAttribute | default('lax')) }}"
+        logo_url: "{{ template_spec.accessApplication.logoUrl | default(base_template_spec.accessApplication.logoUrl | default('')) }}"
+        skip_interstitial: "{{ template_spec.accessApplication.skipInterstitial | default(base_template_spec.accessApplication.skipInterstitial | default(false)) }}"
+        app_launcher_visible: "{{ template_spec.accessApplication.appLauncherVisible | default(base_template_spec.accessApplication.appLauncherVisible | default(true)) }}"
+        service_auth_401_redirect: "{{ template_spec.accessApplication.serviceAuth401Redirect | default(base_template_spec.accessApplication.serviceAuth401Redirect | default(false)) }}"
+        custom_deny_message: "{{ template_spec.accessApplication.customDenyMessage | default(base_template_spec.accessApplication.customDenyMessage | default('')) }}"
+        custom_deny_url: "{{ template_spec.accessApplication.customDenyUrl | default(base_template_spec.accessApplication.customDenyUrl | default('')) }}"
+        custom_non_identity_deny_url: "{{ template_spec.accessApplication.customNonIdentityDenyUrl | default(base_template_spec.accessApplication.customNonIdentityDenyUrl | default('')) }}"
+      when: template_spec.accessApplication is defined or base_template_spec.accessApplication is defined
 
-    - name: Set default Access Application settings
+    - name: Set default Access Application settings when not in template or base template
       ansible.builtin.set_fact:
         create_access_app: false
-        session_duration: "{{ tenant_defaults.sessionDuration | default('24h') }}"
+        session_duration: "24h"
         allow_groups: ""
         allow_emails: ""
-        existing_policy_ids: ""
+        existing_policy_names: ""
         auto_redirect_to_identity: false
         enable_binding_cookie: false
         http_only_cookie_attribute: true
@@ -125,19 +139,75 @@
         custom_deny_message: ""
         custom_deny_url: ""
         custom_non_identity_deny_url: ""
-      when: template_spec.accessApplication is not defined
+      when: template_spec.accessApplication is not defined and base_template_spec.accessApplication is not defined
 
-    - name: Merge Service Token settings
+    - name: Merge Service Token settings (template > base template > hardcoded defaults)
       ansible.builtin.set_fact:
-        create_service_token: "{{ template_spec.serviceToken.enabled | default(false) }}"
-        service_token_duration: "{{ template_spec.serviceToken.duration | default('8760h') }}"
-      when: template_spec.serviceToken is defined
+        create_service_token: "{{ template_spec.serviceToken.enabled | default(base_template_spec.serviceToken.enabled | default(false)) }}"
+        service_token_duration: "{{ template_spec.serviceToken.duration | default(base_template_spec.serviceToken.duration | default('8760h')) }}"
+      when: template_spec.serviceToken is defined or base_template_spec.serviceToken is defined
 
-    - name: Set default Service Token settings
+    - name: Set default Service Token settings when not in template or base template
       ansible.builtin.set_fact:
         create_service_token: false
         service_token_duration: "8760h"
-      when: template_spec.serviceToken is not defined
+      when: template_spec.serviceToken is not defined and base_template_spec.serviceToken is not defined
+      # Step 3b: Per-route annotation overrides.
+      # Take priority over template settings for every field they cover.
+      # Use when you want per-route customisation without a new template, or to
+      # configure a route entirely without referencing a template at all.
+      #
+      # Access:         cfzt.cloudflare.com/access.enabled                ("true"/"false")
+      #                 cfzt.cloudflare.com/access.existingPolicyNames     (comma-separated policy names)
+      #                 cfzt.cloudflare.com/access.sessionDuration         (e.g. "24h")
+      #                 cfzt.cloudflare.com/access.autoRedirectToIdentity  ("true"/"false")
+      #                 cfzt.cloudflare.com/access.skipInterstitial        ("true"/"false")
+      #                 cfzt.cloudflare.com/access.appLauncherVisible      ("true"/"false")
+      #                 cfzt.cloudflare.com/access.serviceAuth401Redirect  ("true"/"false")
+      #                 cfzt.cloudflare.com/access.allowEmails             (comma-separated)
+      #                 cfzt.cloudflare.com/access.allowGroups             (comma-separated)
+      #                 cfzt.cloudflare.com/access.httpOnlyCookieAttribute ("true"/"false")
+      #                 cfzt.cloudflare.com/access.sameSiteCookieAttribute ("lax"/"strict"/"none")
+      # Service token: cfzt.cloudflare.com/serviceToken.enabled           ("true"/"false")
+      #                 cfzt.cloudflare.com/serviceToken.duration          (e.g. "8760h")
+      # Origin:         cfzt.cloudflare.com/origin.url                    (origin service URL)
+      #                 cfzt.cloudflare.com/origin.noTLSVerify            ("true"/"false")
+      - name: Apply per-route annotation overrides
+        ansible.builtin.set_fact:
+          create_access_app:          "{{ ir_annotations['cfzt.cloudflare.com/access.enabled']                 | default(create_access_app)          | bool }}"
+          existing_policy_names:        "{{ ir_annotations['cfzt.cloudflare.com/access.existingPolicyNames']       | default(existing_policy_names) }}"
+          session_duration:           "{{ ir_annotations['cfzt.cloudflare.com/access.sessionDuration']         | default(session_duration) }}"
+          auto_redirect_to_identity:  "{{ ir_annotations['cfzt.cloudflare.com/access.autoRedirectToIdentity']  | default(auto_redirect_to_identity)  | bool }}"
+          skip_interstitial:          "{{ ir_annotations['cfzt.cloudflare.com/access.skipInterstitial']        | default(skip_interstitial)          | bool }}"
+          app_launcher_visible:       "{{ ir_annotations['cfzt.cloudflare.com/access.appLauncherVisible']      | default(app_launcher_visible)       | bool }}"
+          service_auth_401_redirect:  "{{ ir_annotations['cfzt.cloudflare.com/access.serviceAuth401Redirect']  | default(service_auth_401_redirect)  | bool }}"
+          allow_emails:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowEmails']             | default(allow_emails) }}"
+          allow_groups:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowGroups']             | default(allow_groups) }}"
+          http_only_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.httpOnlyCookieAttribute'] | default(http_only_cookie_attribute) | bool }}"
+          same_site_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.sameSiteCookieAttribute'] | default(same_site_cookie_attribute) }}"
+          create_service_token:       "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.enabled']           | default(create_service_token)       | bool }}"
+          service_token_duration:     "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.duration']          | default(service_token_duration) }}"
+          origin_service:             "{{ ir_annotations['cfzt.cloudflare.com/origin.url']                    | default(origin_service) }}"
+          no_tls_verify:              "{{ ir_annotations['cfzt.cloudflare.com/origin.noTLSVerify']             | default(no_tls_verify)              | bool }}"
+
+    # Step 3c: Resolve policy names to UUIDs.
+    # Done in kube_worker so the CloudflareTask CR always carries resolved UUIDs.
+    # Policy names come from the template (existingPolicyNames) and/or annotation override.
+    - name: Resolve existingPolicyNames to UUIDs
+      include_role:
+        name: cloudflare_api
+        tasks_from: lookup_policy_ids.yml
+      vars:
+        cf_api_token: "{{ api_token }}"
+        cf_account_id: "{{ tenant_account_id }}"
+        cf_api_base: "{{ cloudflare_api_base }}"
+        cf_policy_names: "{{ existing_policy_names }}"
+      when: existing_policy_names | length > 0
+
+    - name: Set resolved_policy_ids to empty when no policy names given
+      ansible.builtin.set_fact:
+        resolved_policy_ids: ""
+      when: existing_policy_names | length == 0
 
     # Step 4: Parse core annotations
     - name: Parse hostname and existing CF resource IDs from annotations
@@ -148,6 +218,7 @@
         existing_token_id: "{{ ir_annotations['cfzt.cloudflare.com/serviceTokenId'] | default('') }}"
         existing_cname_id: "{{ ir_annotations['cfzt.cloudflare.com/cnameRecordId'] | default('') }}"
         existing_dns_record_id: "{{ ir_annotations['cfzt.cloudflare.com/dnsRecordId'] | default('') }}"
+        annotation_dns_ip: "{{ ir_annotations['cfzt.cloudflare.com/dnsIp'] | default('') }}"
 
     - name: Validate hostname annotation is present
       ansible.builtin.fail:
@@ -170,17 +241,30 @@
         cf_tenant_zone_id: "{{ tenant_zone_id | default('') }}"
 
     # Step 6: Resolve dns-only target IP into the task spec (also K8s-only work)
+    # IP resolution order:
+    #   1. cfzt.cloudflare.com/dnsIp annotation on the HTTPRoute  (per-route, required unless 2 or 3)
+    #   2. template_spec.dnsOnly.staticIp                          (rare: every route goes to same IP)
+    #   3. template_spec.dnsOnly.ingressServiceRef                 (auto-discover from LoadBalancer Service)
+    # Fail clearly if none of the three are available.
+    - name: Resolve dns-only IP from annotation
+      ansible.builtin.set_fact:
+        dns_target_ip: "{{ annotation_dns_ip }}"
+      when: dns_only_mode and annotation_dns_ip | length > 0
+
     - name: Resolve dns-only static IP from template
       ansible.builtin.set_fact:
         dns_target_ip: "{{ template_spec.dnsOnly.staticIp }}"
-      when: dns_only_mode and template_spec.dnsOnly.staticIp is defined and template_spec.dnsOnly.staticIp | length > 0
+      when: dns_only_mode and annotation_dns_ip | length == 0 and template_spec.dnsOnly.staticIp is defined and template_spec.dnsOnly.staticIp | length > 0
 
     - name: Resolve dns-only IP from ingressServiceRef
-      when: dns_only_mode and (template_spec.dnsOnly.staticIp is not defined or template_spec.dnsOnly.staticIp | default('') | length == 0)
+      when: dns_only_mode and annotation_dns_ip | length == 0 and (template_spec.dnsOnly.staticIp is not defined or template_spec.dnsOnly.staticIp | default('') | length == 0)
       block:
-        - name: Fail if neither staticIp nor ingressServiceRef provided
+        - name: Fail if annotation, staticIp, and ingressServiceRef are all absent
           ansible.builtin.fail:
-            msg: "dnsOnly mode requires either staticIp or ingressServiceRef in template '{{ template_name }}'"
+            msg: >
+              HTTPRoute {{ ir_namespace }}/{{ ir_name }} uses dnsOnly template '{{ template_name }}'
+              but provides no target IP. Add annotation cfzt.cloudflare.com/dnsIp: "<private-ip>"
+              to the HTTPRoute, or set dnsOnly.ingressServiceRef in the template.
           when: template_spec.dnsOnly.ingressServiceRef is not defined
 
         - name: Look up LoadBalancer Service
@@ -213,6 +297,27 @@
       ansible.builtin.set_fact:
         dns_target_ip: ""
       when: not dns_only_mode
+
+    # Step 6b: Validate dns_target_ip is an RFC 1918 private address.
+    # DNS-only templates must always point to a private cluster IP — never a
+    # public address. The three private CIDR blocks are:
+    #   10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    - name: Check dns_target_ip falls in an RFC 1918 private CIDR block
+      ansible.builtin.set_fact:
+        _ip_is_private: >-
+          {{ (dns_target_ip | ansible.utils.ipaddr('10.0.0.0/8') | length > 0)
+          or (dns_target_ip | ansible.utils.ipaddr('172.16.0.0/12') | length > 0)
+          or (dns_target_ip | ansible.utils.ipaddr('192.168.0.0/16') | length > 0) }}
+      when: dns_only_mode
+
+    - name: Fail if dns_target_ip is not a private RFC 1918 address
+      ansible.builtin.fail:
+        msg: >
+          dnsOnly template '{{ template_name }}' has a non-private target IP:
+          '{{ dns_target_ip }}'. DNS-only templates must point to a private
+          RFC 1918 address (10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16).
+          Public IPs are not allowed — use a tunnel template instead.
+      when: dns_only_mode and not _ip_is_private
 
     # Step 7: Build and apply the CloudflareTask CR
     - name: Set CloudflareTask name
@@ -269,7 +374,7 @@
                 sessionDuration: "{{ session_duration }}"
                 allowGroups: "{{ allow_groups }}"
                 allowEmails: "{{ allow_emails }}"
-                existingPolicyIds: "{{ existing_policy_ids }}"
+                  existingPolicyIds: "{{ resolved_policy_ids }}"
                 autoRedirectToIdentity: "{{ auto_redirect_to_identity }}"
                 enableBindingCookie: "{{ enable_binding_cookie }}"
                 httpOnlyCookieAttribute: "{{ http_only_cookie_attribute }}"
@@ -288,8 +393,8 @@
               dnsRecord:
                 enabled: "{{ dns_only_mode }}"
                 ipAddress: "{{ dns_target_ip }}"
-                proxied: "{{ template_spec.dnsOnly.proxied | default(false) }}"
-                ttl: "{{ template_spec.dnsOnly.ttl | default(120) }}"
+                  proxied: "{{ dns_proxied }}"
+                  ttl: "{{ dns_ttl }}"
             existingIds:
               appId: "{{ existing_app_id }}"
               serviceTokenId: "{{ existing_token_id }}"

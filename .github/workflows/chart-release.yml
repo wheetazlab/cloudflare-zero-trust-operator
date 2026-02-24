@@ -2,8 +2,10 @@ name: Release Helm Chart
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - main
+    paths:
+      - 'charts/**'
   workflow_dispatch:
 
 jobs:
@@ -31,11 +33,11 @@ jobs:
           if ! git ls-remote --exit-code origin gh-pages; then
             git checkout --orphan gh-pages
             git rm -rf .
-            cat > _config.yml << 'EOF'
-theme: jekyll-theme-tactile
-title: Cloudflare Zero Trust Operator
-description: Helm chart repository for the Cloudflare Zero Trust Operator
-EOF
+            {
+              echo "theme: jekyll-theme-tactile"
+              echo "title: Cloudflare Zero Trust Operator"
+              echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
+            } > _config.yml
             git add _config.yml
             git commit -m "chore: init gh-pages with Tactile theme"
             git push origin gh-pages
@@ -51,11 +53,11 @@ EOF
         run: |
           git fetch origin gh-pages
           git checkout gh-pages
-          cat > _config.yml << 'EOF'
-theme: jekyll-theme-tactile
-title: Cloudflare Zero Trust Operator
-description: Helm chart repository for the Cloudflare Zero Trust Operator
-EOF
+          {
+            echo "theme: jekyll-theme-tactile"
+            echo "title: Cloudflare Zero Trust Operator"
+            echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
+          } > _config.yml
           git add _config.yml
           git diff --cached --quiet || git commit -m "chore: ensure Tactile theme [skip ci]"
           git push origin gh-pages

@@ -26,20 +26,36 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Bootstrap gh-pages branch if missing
+        run: |
+          if ! git ls-remote --exit-code origin gh-pages; then
+            git checkout --orphan gh-pages
+            git rm -rf .
+            cat > _config.yml << 'EOF'
+theme: jekyll-theme-tactile
+title: Cloudflare Zero Trust Operator
+description: Helm chart repository for the Cloudflare Zero Trust Operator
+EOF
+            git add _config.yml
+            git commit -m "chore: init gh-pages with Tactile theme"
+            git push origin gh-pages
+            git checkout main
+          fi
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Disable Jekyll on gh-pages branch
+      - name: Ensure Tactile theme on gh-pages
         run: |
-          if git fetch origin gh-pages 2>/dev/null; then
-            git checkout gh-pages
-          else
-            git checkout --orphan gh-pages
-            git rm -rf . 2>/dev/null || true
-          fi
-          touch .nojekyll
-          git add .nojekyll
-          git diff --cached --quiet || git commit -m "chore: disable Jekyll processing [skip ci]"
+          git fetch origin gh-pages
+          git checkout gh-pages
+          cat > _config.yml << 'EOF'
+theme: jekyll-theme-tactile
+title: Cloudflare Zero Trust Operator
+description: Helm chart repository for the Cloudflare Zero Trust Operator
+EOF
+          git add _config.yml
+          git diff --cached --quiet || git commit -m "chore: ensure Tactile theme [skip ci]"
           git push origin gh-pages

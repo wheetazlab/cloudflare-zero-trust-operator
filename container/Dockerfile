@@ -32,6 +32,9 @@ COPY ansible/ /ansible/
 COPY container/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Symlink python3 to /usr/bin so both /usr/bin/python3 and /usr/local/bin/python3 work
+RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
+
 # Create non-root user
 RUN useradd -m -u 1000 ansible && \
     chown -R ansible:ansible /ansible && \

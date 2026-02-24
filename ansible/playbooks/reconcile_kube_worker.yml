@@ -51,6 +51,8 @@
       include_role:
         name: kube_worker
         tasks_from: list_httproutes.yml
+      vars:
+        namespaces: "{{ watch_namespaces.split(',') | select() | list if watch_namespaces else [] }}"
 
     # Phase 5: For each tenant, reconcile its HTTPRoutes into CloudflareTask CRs
     - name: Reconcile tenants

@@ -4,7 +4,7 @@
     api_version: gateway.networking.k8s.io/v1
     kind: HTTPRoute
   register: httproute_list_all
-  when: namespaces | length == 0
+  when: (namespaces | default([])) | length == 0
 
 - name: List HTTPRoute resources (specific namespaces)
   kubernetes.core.k8s_info:
@@ -12,18 +12,18 @@
     kind: HTTPRoute
     namespace: "{{ item }}"
   register: httproute_list_specific
-  loop: "{{ namespaces }}"
-  when: namespaces | length > 0
+  loop: "{{ namespaces | default([]) }}"
+  when: (namespaces | default([])) | length > 0
 
 - name: Combine HTTPRoute results (specific namespaces)
   ansible.builtin.set_fact:
     all_httproutes: "{{ httproute_list_specific.results | map(attribute='resources') | flatten }}"
-  when: namespaces | length > 0
+  when: (namespaces | default([])) | length > 0
 
 - name: Set all_httproutes fact (all namespaces)
   ansible.builtin.set_fact:
     all_httproutes: "{{ httproute_list_all.resources }}"
-  when: namespaces | length == 0
+  when: (namespaces | default([])) | length == 0
 
 - name: Filter HTTPRoutes with cfzt enabled
   ansible.builtin.set_fact:

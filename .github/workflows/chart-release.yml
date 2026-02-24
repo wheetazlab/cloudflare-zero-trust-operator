@@ -2,8 +2,6 @@ name: Release Helm Chart
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
     branches:
       - main
     paths:

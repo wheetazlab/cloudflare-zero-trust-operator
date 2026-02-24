@@ -38,8 +38,30 @@ jobs:
               echo "title: Cloudflare Zero Trust Operator"
               echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
             } > _config.yml
-            git add _config.yml
-            git commit -m "chore: init gh-pages with Tactile theme"
+            {
+              echo "## Cloudflare Zero Trust Operator"
+              echo ""
+              echo "A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by watching HTTPRoute resources and reconciling them with the Cloudflare API."
+              echo ""
+              echo "### Install via Helm"
+              echo ""
+              echo '```bash'
+              echo "helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator"
+              echo "helm repo update"
+              echo "helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \\"
+              echo "  --set tenant.create=true \\"
+              echo "  --set tenant.instanceName=mycluster \\"
+              echo "  --set tenant.accountId=<your-account-id> \\"
+              echo "  --set tenant.tunnelId=<your-tunnel-id> \\"
+              echo "  --set tenant.apiToken=<your-api-token>"
+              echo '```'
+              echo ""
+              echo "### Source"
+              echo ""
+              echo "[github.com/wheetazlab/cloudflare-zero-trust-operator](https://github.com/wheetazlab/cloudflare-zero-trust-operator)"
+            } > index.md
+            git add _config.yml index.md
+            git commit -m "chore: init gh-pages with Tactile theme and landing page"
             git push origin gh-pages
             git checkout main
           fi
@@ -49,7 +71,7 @@ jobs:
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Ensure Tactile theme on gh-pages
+      - name: Ensure Tactile theme and landing page on gh-pages
         run: |
           git fetch origin gh-pages
           git checkout gh-pages
@@ -58,6 +80,28 @@ jobs:
             echo "title: Cloudflare Zero Trust Operator"
             echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
           } > _config.yml
-          git add _config.yml
-          git diff --cached --quiet || git commit -m "chore: ensure Tactile theme [skip ci]"
+          {
+            echo "## Cloudflare Zero Trust Operator"
+            echo ""
+            echo "A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by watching HTTPRoute resources and reconciling them with the Cloudflare API."
+            echo ""
+            echo "### Install via Helm"
+            echo ""
+            echo '```bash'
+            echo "helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator"
+            echo "helm repo update"
+            echo "helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \\"
+            echo "  --set tenant.create=true \\"
+            echo "  --set tenant.instanceName=mycluster \\"
+            echo "  --set tenant.accountId=<your-account-id> \\"
+            echo "  --set tenant.tunnelId=<your-tunnel-id> \\"
+            echo "  --set tenant.apiToken=<your-api-token>"
+            echo '```'
+            echo ""
+            echo "### Source"
+            echo ""
+            echo "[github.com/wheetazlab/cloudflare-zero-trust-operator](https://github.com/wheetazlab/cloudflare-zero-trust-operator)"
+          } > index.md
+          git add _config.yml index.md
+          git diff --cached --quiet || git commit -m "chore: ensure Tactile theme and landing page [skip ci]"
           git push origin gh-pages

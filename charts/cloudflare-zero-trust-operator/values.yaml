@@ -133,9 +133,10 @@ tenant:
   # Nothing is rendered when this is false.
   create: false
 
-  # (Required when create=true) Name of the CloudflareZeroTrustTenant CR.
-  # There is intentionally no default — you must choose a meaningful name.
-  name: ""
+  # (Required when create=true) Instance name for the CloudflareZeroTrustTenant CR
+  # (becomes metadata.name). There is intentionally no default — you must choose
+  # a meaningful label, e.g. "home", "prod", "wheetazlab".
+  instanceName: ""
 
   # Namespace in which the Tenant CR and Secret are created.
   # Defaults to the operator's release namespace when left empty.

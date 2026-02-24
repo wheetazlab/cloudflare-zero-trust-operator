@@ -108,7 +108,7 @@ helm install cloudflare-zero-trust-operator ./charts/cloudflare-zero-trust-opera
   --namespace cloudflare-zero-trust \
   --create-namespace \
   --set tenant.create=true \
-  --set tenant.name=prod-tenant \
+  --set tenant.instanceName=prod-tenant \
   --set tenant.accountId=<ACCOUNT_ID> \
   --set tenant.tunnelId=<TUNNEL_ID> \
   --set tenant.apiToken=<YOUR_TOKEN>
@@ -142,10 +142,13 @@ operator:
 
 tenant:
   create: true
-  name: "prod-tenant"                              # required — choose a meaningful name
+  instanceName: "prod-tenant"                       # required — a label for this CR instance
   accountId: "abcdef1234567890abcdef1234567890"    # required — 32-char hex
   tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # required — UUID
-  zoneId:    "fedcba0987654321fedcba0987654321"    # optional
+  # zoneId: "fedcba0987654321fedcba0987654321"  # optional — zone is auto-discovered from
+  #                                               # each hostname via the Cloudflare Zones API.
+  #                                               # Set only to validate or when Zone:Read is
+  #                                               # not available on the token.
 
   # Option A — inline token (Helm creates the Secret for you):
   apiToken: "your-cloudflare-api-token"
@@ -180,14 +183,14 @@ helm install cloudflare-zero-trust-operator ./charts/cloudflare-zero-trust-opera
 
 When all required tenant values are supplied, Helm renders:
 
-1. A `Secret` named `<tenant.name>-api-token` (only when `apiToken` is set)
+1. A `Secret` named `<tenant.instanceName>-api-token` (only when `apiToken` is set)
 2. A `CloudflareZeroTrustTenant` CR pointing `credentialRef` at that Secret
 
 **The chart will fail at render time if any of the following are missing:**
 
 | Missing value | Error |
 |---|---|
-| `tenant.name` | `tenant.name is required when tenant.create=true` |
+| `tenant.instanceName` | `tenant.instanceName is required when tenant.create=true` |
 | `tenant.accountId` | `tenant.accountId is required when tenant.create=true` |
 | `tenant.tunnelId` | `tenant.tunnelId is required when tenant.create=true` |
 | both `apiToken` and `existingSecret.name` empty | `Either tenant.apiToken or tenant.existingSecret.name must be set when tenant.create=true` |
@@ -416,12 +419,12 @@ All of these are ignored when `tenant.create=false` (the default).
 | Key | Default | Required when `create=true` | Description |
 |-----|---------|------|-------------|
 | `tenant.create` | `false` | — | Set to `true` to render the Tenant CR and optional Secret |
-| `tenant.name` | `""` | **yes** | Name of the `CloudflareZeroTrustTenant` CR |
+| `tenant.instanceName` | `""` | **yes** | Instance name for the `CloudflareZeroTrustTenant` CR (`metadata.name`) |
 | `tenant.namespace` | `""` | no | Namespace for the CR and Secret; defaults to the release namespace |
 | `tenant.accountId` | `""` | **yes** | Cloudflare Account ID (32-char hex) |
 | `tenant.tunnelId` | `""` | **yes** | Cloudflare Tunnel ID (UUID) |
 | `tenant.zoneId` | `""` | no† | Cloudflare Zone ID (32-char hex). Required for automatic DNS — tunnel CNAME in tunnel mode, A record in dns-only mode. Without it DNS must be managed manually. |
-| `tenant.apiToken` | `""` | **yes\*** | Inline API token — Helm creates a `<name>-api-token` Secret |
+| `tenant.apiToken` | `""` | **yes\*** | Inline API token — Helm creates a `<instanceName>-api-token` Secret |
 | `tenant.existingSecret.name` | `""` | **yes\*** | Name of a pre-existing Secret containing the token |
 | `tenant.existingSecret.key` | `"token"` | no | Key inside the existing Secret |
 | `tenant.defaults.sessionDuration` | `"24h"` | no | Default Access session duration |

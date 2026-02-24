@@ -1,5 +1,5 @@
 {{- if .Values.tenant.create }}
-{{- $name := required "tenant.name is required when tenant.create=true" .Values.tenant.name }}
+{{- $name := required "tenant.instanceName is required when tenant.create=true" .Values.tenant.instanceName }}
 {{- $ns := .Values.tenant.namespace | default (include "cloudflare-zero-trust-operator.namespace" .) }}
 ---
 {{- if .Values.tenant.apiToken }}

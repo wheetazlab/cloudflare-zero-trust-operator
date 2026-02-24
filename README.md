@@ -9,7 +9,7 @@ A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from
 - 🔒 **Access Control** — Automatically create and manage Cloudflare Access Applications and Policies
 - 🔑 **Service Tokens** — Generate service tokens for machine-to-machine authentication
 - 🌐 **Tunnel Management** — Configure Cloudflare Tunnel hostname routes
-- 🔗 **Automatic DNS** — Creates the tunnel CNAME (`hostname → <tunnel-id>.cfargotunnel.com`) automatically when `zoneId` is set on the tenant
+- 🔗 **Automatic DNS** — Creates the tunnel CNAME (`hostname → <tunnel-id>.cfargotunnel.com`) automatically; zone is auto-discovered from the hostname via the Cloudflare API (optional `zoneId` on the tenant acts as a validation guard)
 - 📡 **DNS-only mode** — Publish internal services via a Cloudflare A record pointing at your cluster VIP, with no tunnel required
 - 🔄 **Idempotent** — Safe to run repeatedly; handles creates, updates, and deletions
 - 🎯 **Multi-tenant** — Support multiple Cloudflare accounts in one cluster
@@ -31,10 +31,10 @@ Create `my-values.yaml`:
 ```yaml
 tenant:
   create: true
-  name: "prod-tenant"
+  instanceName: "prod-tenant"
   accountId: "abcdef1234567890abcdef1234567890"    # Cloudflare Account ID
   tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" # Cloudflare Tunnel ID
-  zoneId:    "fedcba0987654321fedcba0987654321"    # Zone ID (enables automatic DNS)
+  # zoneId: "fedcba0987654321fedcba0987654321"    # optional — auto-discovered from hostname
   apiToken:  "your-cloudflare-api-token"
 ```
 
@@ -81,7 +81,7 @@ The operator reconciles the annotation and:
 The operator watches `HTTPRoute` resources for annotations and automatically manages:
 
 1. **Cloudflare Tunnel hostname routes** — routes public hostnames through your tunnel to origin services
-2. **Automatic CNAME DNS** — creates `hostname CNAME <tunnel-id>.cfargotunnel.com` (proxied, TTL auto) when `tenant.zoneId` is set; logs a warning and skips if not set
+2. **Automatic CNAME DNS** — creates `hostname CNAME <tunnel-id>.cfargotunnel.com` (proxied, TTL auto); zone ID is auto-discovered from the hostname via the Cloudflare Zones API — no `zoneId` required. If `tenant.zoneId` is set it is validated against the discovered value as a safety check
 3. **Cloudflare Access Applications** — protects your applications with Cloudflare Access
 4. **Access Policies** — configures who can access your applications (email, groups, etc.)
 5. **Service Tokens** — creates tokens for machine-to-machine authentication

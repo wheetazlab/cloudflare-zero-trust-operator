@@ -14,6 +14,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   originService:
     url: "https://traefik.traefik.svc.cluster.local:443"
@@ -41,6 +45,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   accessApplication:
     enabled: true
@@ -66,6 +74,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   accessApplication:
     enabled: false
@@ -83,6 +95,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   # Only the fields that differ from the base template are specified here.
   # base: httpRedirect=true, tlsTimeout=10 — overridden below for API consumers.
@@ -115,6 +131,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   dnsOnly:
     enabled: true
@@ -135,6 +155,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   accountId: "0123456789abcdef0123456789abcdef"  # Replace: your 32-char Cloudflare account ID
   tunnelId: "12345678-1234-1234-1234-123456789abc"  # Replace: your tunnel UUID
@@ -158,6 +182,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
     cfzt.cloudflare.com/example: "true"
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
 type: Opaque
 stringData:
   token: "YOUR_CLOUDFLARE_API_TOKEN_HERE"

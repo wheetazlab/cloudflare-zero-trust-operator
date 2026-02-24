@@ -133,7 +133,7 @@ rbac:
 # They are labelled cfzt.cloudflare.com/example: "true" for easy cleanup:
 #   kubectl delete cfzttemplate -l cfzt.cloudflare.com/example=true
 exampleTemplates:
-  install: true
+  install: false
 
 # -------------------------------------------------------------------
 tenant:

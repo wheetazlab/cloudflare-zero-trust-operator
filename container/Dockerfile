@@ -40,5 +40,9 @@ RUN useradd -m -u 1000 ansible && \
 
 USER ansible
 
+# Redirect Ansible temp dirs to /tmp (writable even with read-only root filesystem)
+ENV ANSIBLE_LOCAL_TEMP=/tmp/ansible \
+    ANSIBLE_REMOTE_TMP=/tmp/ansible
+
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

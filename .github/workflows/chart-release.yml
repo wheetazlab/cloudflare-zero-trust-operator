@@ -30,3 +30,12 @@ jobs:
         uses: helm/chart-releaser-action@v1.6.0
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Disable Jekyll on gh-pages branch
+        run: |
+          git fetch origin gh-pages
+          git checkout gh-pages
+          touch .nojekyll
+          git add .nojekyll
+          git diff --cached --quiet || git commit -m "chore: disable Jekyll processing [skip ci]"
+          git push origin gh-pages

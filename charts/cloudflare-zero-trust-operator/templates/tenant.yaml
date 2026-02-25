@@ -11,10 +11,6 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "0"
-    helm.sh/hook-delete-policy: before-hook-creation
 type: Opaque
 stringData:
   token: {{ .Values.tenant.apiToken | quote }}
@@ -28,10 +24,6 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   accountId: {{ required "tenant.accountId is required when tenant.create=true" .Values.tenant.accountId | quote }}
   tunnelId: {{ required "tenant.tunnelId is required when tenant.create=true" .Values.tenant.tunnelId | quote }}

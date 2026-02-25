@@ -19,9 +19,8 @@ imagePullSecrets: []
 # Namespace
 # -------------------------------------------------------------------
 # The namespace in which the operator is installed.
-# If createNamespace is true the chart will create it.
+# Pass --create-namespace to helm install/upgrade to create it.
 namespaceOverride: ""
-createNamespace: true
 
 # -------------------------------------------------------------------
 # Operator runtime switches

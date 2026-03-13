@@ -23,12 +23,12 @@
     status_conditions:
       - type: "Applied"
         status: "{{ deployment_update_result.changed | default(false) | ternary('True', operator_config.status.conditions | selectattr('type', 'equalto', 'Applied') | map(attribute='status') | first | default('Unknown')) }}"
-        lastTransitionTime: "{{ now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ") }}"
+        lastTransitionTime: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
         reason: "{{ deployment_update_result.changed | default(false) | ternary('ConfigurationApplied', 'NoChangesNeeded') }}"
         message: "{{ deployment_update_result.changed | default(false) | ternary('OperatorConfig successfully applied to deployment', 'Deployment already matches configuration') }}"
       - type: "Ready"
         status: "{{ deployment_ready | ternary('True', 'False') }}"
-        lastTransitionTime: "{{ now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ") }}"
+        lastTransitionTime: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
         reason: "{{ deployment_ready | ternary('DeploymentReady', 'DeploymentNotReady') }}"
         message: "{{ deployment_ready | ternary('Operator deployment is ready', 'Waiting for deployment to become ready') }}"
 
@@ -42,7 +42,7 @@
     definition:
       status:
         observedGeneration: "{{ operator_config.metadata.generation }}"
-        lastAppliedTime: "{{ now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ") }}"
+        lastAppliedTime: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
         deploymentReady: "{{ deployment_ready }}"
         conditions: "{{ status_conditions }}"
   register: status_update_result

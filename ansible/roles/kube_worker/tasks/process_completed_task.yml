@@ -35,7 +35,7 @@
         {
           'cfzt.cloudflare.com/hostnameRouteId':  ct_result.tunnelRouteId  | default(''),
           'cfzt.cloudflare.com/cnameRecordId':    ct_result.cnameRecordId  | default(''),
-          'cfzt.cloudflare.com/lastReconcile':    now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ")
+          'cfzt.cloudflare.com/lastReconcile':    now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')
         }
         | combine({'cfzt.cloudflare.com/accessAppId':    ct_result.accessAppId    | default('')} if ct_result.accessAppId    is defined else {})
         | combine({'cfzt.cloudflare.com/accessPolicyIds': ct_result.accessPolicyIds | default('')} if ct_result.accessPolicyIds is defined else {})

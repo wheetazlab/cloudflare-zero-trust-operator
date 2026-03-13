@@ -47,13 +47,13 @@
         api_version: cfzt.cloudflare.com/v1alpha1
         kind: CloudflareZeroTrustTemplate
         name: "{{ template_name }}"
-        namespace: "{{ ir_namespace }}"
+        namespace: "{{ tenant_namespace }}"
       register: template_result
       when: template_name != ""
 
     - name: Validate template exists
       ansible.builtin.fail:
-        msg: "Template '{{ template_name }}' not found in namespace {{ ir_namespace }}"
+        msg: "Template '{{ template_name }}' not found in namespace {{ tenant_namespace }}"
       when: template_name != "" and template_result.resources | length == 0
 
     - name: Extract template spec

@@ -101,11 +101,11 @@
     subresource: status
     definition:
       status:
-        lastSyncTime: "{{ ansible_date_time.iso8601 }}"
+        lastSyncTime: "{{ now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ") }}"
         observedGeneration: "{{ tenant.metadata.generation | int }}"
   register: tenant_status_update
   failed_when: false
 
 - name: Display tenant reconciliation complete
   ansible.builtin.debug:
-    msg: "kube_worker: tenant {{ tenant_namespace }}/{{ tenant_name }} reconciled, lastSyncTime={{ ansible_date_time.iso8601 }}"
+    msg: "kube_worker: tenant {{ tenant_namespace }}/{{ tenant_name }} reconciled, lastSyncTime={{ now(utc=true, fmt="%Y-%m-%dT%H:%M:%SZ") }}"

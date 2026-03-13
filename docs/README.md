@@ -16,35 +16,30 @@ The operator consists of:
 
 ### Component Overview
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                        │
-│                                                              │
-│  ┌──────────────────────┐      ┌────────────────────────┐  │
-│  │ CloudflareZeroTrust  │      │  Gateway API HTTPRoute  │  │
-│  │      Tenant CR       │      │   (with annotations)   │  │
-│  └──────────────────────┘      └────────────────────────┘  │
-│            │                              │                  │
-│            └──────────┬───────────────────┘                  │
-│                       │                                      │
-│            ┌──────────▼──────────┐                          │
-│            │  Operator Pod       │                          │
-│            │  (Ansible Runner)   │                          │
-│            └──────────┬──────────┘                          │
-│                       │                                      │
-└───────────────────────┼──────────────────────────────────────┘
-                        │
-                        │ Cloudflare API
-                        ▼
-            ┌───────────────────────┐
-            │  Cloudflare Zero      │
-            │  Trust Platform       │
-            │                       │
-            │  • Tunnel Hostnames   │
-            │  • Access Apps        │
-            │  • Access Policies    │
-            │  • Service Tokens     │
-            └───────────────────────┘
+```mermaid
+flowchart TB
+    subgraph k8s["Kubernetes Cluster"]
+        tenant["CloudflareZeroTrust\nTenant CR"]
+        httproute["Gateway API HTTPRoute\n(with annotations)"]
+        subgraph operator["Operator Pod (Ansible Runner)"]
+            manager["Manager"]
+            kube_worker["Kube Worker"]
+            cf_worker["Cloudflare Worker"]
+        end
+        tenant --> kube_worker
+        httproute --> kube_worker
+        manager --> kube_worker
+        manager --> cf_worker
+    end
+
+    subgraph cf["Cloudflare Zero Trust Platform"]
+        tunnels["Tunnel Hostnames"]
+        access_apps["Access Apps"]
+        access_policies["Access Policies"]
+        service_tokens["Service Tokens"]
+    end
+
+    cf_worker -->|"Cloudflare API"| cf
 ```
 
 ### Reconciliation Flow

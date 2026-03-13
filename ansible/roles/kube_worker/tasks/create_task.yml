@@ -16,7 +16,6 @@
 - name: Check HTTPRoute state
   include_tasks: check_state.yml
   vars:
-    httproute: "{{ httproute }}"
     operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
 
 - name: Skip if no changes detected

@@ -6,7 +6,7 @@ description: >
   The operator is packaged as a container running Ansible roles.
 type: application
 version: 0.1.13
-appVersion: "0.1.13"
+appVersion: "0.1.12"
 keywords:
   - cloudflare
   - zero-trust

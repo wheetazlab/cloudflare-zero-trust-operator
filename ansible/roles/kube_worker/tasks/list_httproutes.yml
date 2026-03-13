@@ -25,15 +25,17 @@
     all_httproutes: "{{ httproute_list_all.resources }}"
   when: (namespaces | default([])) | length == 0
 
+- name: Reset cfzt_httproutes accumulator
+  ansible.builtin.set_fact:
+    cfzt_httproutes: []
+
 - name: Filter HTTPRoutes with cfzt enabled
   ansible.builtin.set_fact:
-    cfzt_httproutes: >-
-      {{
-        all_httproutes
-        | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'defined')
-        | selectattr('metadata.annotations.cfzt.cloudflare.com/enabled', 'equalto', 'true')
-        | list
-      }}
+    cfzt_httproutes: "{{ cfzt_httproutes + [item] }}"
+  loop: "{{ all_httproutes }}"
+  when:
+    - item.metadata.annotations is defined
+    - item.metadata.annotations['cfzt.cloudflare.com/enabled'] | default('false') == 'true'
 
 - name: Display HTTPRoute count
   ansible.builtin.debug:

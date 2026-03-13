@@ -60,23 +60,16 @@
   ansible.builtin.set_fact:
     api_token: "{{ credential_secret.resources[0].data[tenant_credential_ref.key | default('token')] | b64decode }}"
 
-- name: Filter HTTPRoutes that belong to this tenant's namespace
+- name: Reset tenant_httproutes accumulator
   ansible.builtin.set_fact:
-    tenant_httproutes: "{{ cfzt_httproutes | selectattr('metadata.namespace', 'equalto', tenant_namespace) | list }}"
+    tenant_httproutes: []
 
-- name: Further filter by tenant annotation when present
+- name: Filter HTTPRoutes enabled for tenant {{ tenant_name }}
   ansible.builtin.set_fact:
-    tenant_httproutes: >-
-      {{
-        tenant_httproutes
-        | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined')
-        | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'equalto', tenant_name)
-        | list
-      }}
-  when: >
-    tenant_httproutes
-    | selectattr('metadata.annotations.cfzt.cloudflare.com/tenant', 'defined')
-    | list | length > 0
+    tenant_httproutes: "{{ tenant_httproutes + [item] }}"
+  loop: "{{ cfzt_httproutes }}"
+  when:
+    - item.metadata.annotations['cfzt.cloudflare.com/tenant'] | default('') == tenant_name
 
 - name: Display HTTPRoute count
   ansible.builtin.debug:

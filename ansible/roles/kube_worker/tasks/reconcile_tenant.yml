@@ -91,3 +91,19 @@
   vars:
     cloudflare_api_base: "{{ cloudflare_api_base }}"
     operator_namespace: "{{ operator_namespace }}"
+
+- name: Patch tenant status with lastSyncTime
+  kubernetes.core.k8s_status:
+    api_version: cfzt.cloudflare.com/v1alpha1
+    kind: CloudflareZeroTrustTenant
+    name: "{{ tenant_name }}"
+    namespace: "{{ tenant_namespace }}"
+    status:
+      lastSyncTime: "{{ ansible_date_time.iso8601 }}"
+      observedGeneration: "{{ tenant.metadata.generation | int }}"
+  register: tenant_status_update
+  failed_when: false
+
+- name: Display tenant reconciliation complete
+  ansible.builtin.debug:
+    msg: "kube_worker: tenant {{ tenant_namespace }}/{{ tenant_name }} reconciled, lastSyncTime={{ ansible_date_time.iso8601 }}"

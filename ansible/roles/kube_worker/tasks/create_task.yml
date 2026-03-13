@@ -38,7 +38,7 @@
     # Step 2: Load template
     - name: Get template name from annotation
       ansible.builtin.set_fact:
-template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
+        template_name: "{{ ir_annotations['cfzt.cloudflare.com/template'] | default('') }}"
 
     # Step 2 note: template is optional. Omit cfzt.cloudflare.com/template (or set it to "")
     # and configure the route entirely with per-route annotation overrides (Step 3b below).
@@ -50,28 +50,28 @@ template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
         name: "{{ template_name }}"
         namespace: "{{ ir_namespace }}"
       register: template_result
-        when: template_name != ""
+      when: template_name != ""
 
-      - name: Validate template exists
-        ansible.builtin.fail:
-          msg: "Template '{{ template_name }}' not found in namespace {{ ir_namespace }}"
-        when: template_name != "" and template_result.resources | length == 0
+    - name: Validate template exists
+      ansible.builtin.fail:
+        msg: "Template '{{ template_name }}' not found in namespace {{ ir_namespace }}"
+      when: template_name != "" and template_result.resources | length == 0
 
-      - name: Extract template spec
-        ansible.builtin.set_fact:
-          template_spec: "{{ template_result.resources[0].spec }}"
-        when: template_name != ""
+    - name: Extract template spec
+      ansible.builtin.set_fact:
+        template_spec: "{{ template_result.resources[0].spec }}"
+      when: template_name != ""
 
-      - name: Set empty template spec when no template specified
-        ansible.builtin.set_fact:
-          template_spec: {}
-        when: template_name == ""
+    - name: Set empty template spec when no template specified
+      ansible.builtin.set_fact:
+        template_spec: {}
+      when: template_name == ""
 
-      - name: Detect dns-only mode and extract DNS record settings
-        ansible.builtin.set_fact:
-          dns_only_mode: "{{ template_spec.dnsOnly.enabled | default(false) }}"
-          dns_proxied: "{{ template_spec.dnsOnly.proxied | default(false) }}"
-          dns_ttl: "{{ template_spec.dnsOnly.ttl | default(120) | int }}"
+    - name: Detect dns-only mode and extract DNS record settings
+      ansible.builtin.set_fact:
+        dns_only_mode: "{{ template_spec.dnsOnly.enabled | default(false) }}"
+        dns_proxied: "{{ template_spec.dnsOnly.proxied | default(false) }}"
+        dns_ttl: "{{ template_spec.dnsOnly.ttl | default(120) | int }}"
 
     # Step 3a: Merge settings. Order of precedence (highest → lowest):
     #   annotation overrides (Step 3b) → per-route template → base template → hardcoded defaults
@@ -172,23 +172,23 @@ template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
       #                 cfzt.cloudflare.com/serviceToken.duration          (e.g. "8760h")
       # Origin:         cfzt.cloudflare.com/origin.url                    (origin service URL)
       #                 cfzt.cloudflare.com/origin.noTLSVerify            ("true"/"false")
-      - name: Apply per-route annotation overrides
-        ansible.builtin.set_fact:
-          create_access_app:          "{{ ir_annotations['cfzt.cloudflare.com/access.enabled']                 | default(create_access_app)          | bool }}"
-          existing_policy_names:        "{{ ir_annotations['cfzt.cloudflare.com/access.existingPolicyNames']       | default(existing_policy_names) }}"
-          session_duration:           "{{ ir_annotations['cfzt.cloudflare.com/access.sessionDuration']         | default(session_duration) }}"
-          auto_redirect_to_identity:  "{{ ir_annotations['cfzt.cloudflare.com/access.autoRedirectToIdentity']  | default(auto_redirect_to_identity)  | bool }}"
-          skip_interstitial:          "{{ ir_annotations['cfzt.cloudflare.com/access.skipInterstitial']        | default(skip_interstitial)          | bool }}"
-          app_launcher_visible:       "{{ ir_annotations['cfzt.cloudflare.com/access.appLauncherVisible']      | default(app_launcher_visible)       | bool }}"
-          service_auth_401_redirect:  "{{ ir_annotations['cfzt.cloudflare.com/access.serviceAuth401Redirect']  | default(service_auth_401_redirect)  | bool }}"
-          allow_emails:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowEmails']             | default(allow_emails) }}"
-          allow_groups:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowGroups']             | default(allow_groups) }}"
-          http_only_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.httpOnlyCookieAttribute'] | default(http_only_cookie_attribute) | bool }}"
-          same_site_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.sameSiteCookieAttribute'] | default(same_site_cookie_attribute) }}"
-          create_service_token:       "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.enabled']           | default(create_service_token)       | bool }}"
-          service_token_duration:     "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.duration']          | default(service_token_duration) }}"
-          origin_service:             "{{ ir_annotations['cfzt.cloudflare.com/origin.url']                    | default(origin_service) }}"
-          no_tls_verify:              "{{ ir_annotations['cfzt.cloudflare.com/origin.noTLSVerify']             | default(no_tls_verify)              | bool }}"
+    - name: Apply per-route annotation overrides
+      ansible.builtin.set_fact:
+        create_access_app:          "{{ ir_annotations['cfzt.cloudflare.com/access.enabled']                 | default(create_access_app)          | bool }}"
+        existing_policy_names:        "{{ ir_annotations['cfzt.cloudflare.com/access.existingPolicyNames']       | default(existing_policy_names) }}"
+        session_duration:           "{{ ir_annotations['cfzt.cloudflare.com/access.sessionDuration']         | default(session_duration) }}"
+        auto_redirect_to_identity:  "{{ ir_annotations['cfzt.cloudflare.com/access.autoRedirectToIdentity']  | default(auto_redirect_to_identity)  | bool }}"
+        skip_interstitial:          "{{ ir_annotations['cfzt.cloudflare.com/access.skipInterstitial']        | default(skip_interstitial)          | bool }}"
+        app_launcher_visible:       "{{ ir_annotations['cfzt.cloudflare.com/access.appLauncherVisible']      | default(app_launcher_visible)       | bool }}"
+        service_auth_401_redirect:  "{{ ir_annotations['cfzt.cloudflare.com/access.serviceAuth401Redirect']  | default(service_auth_401_redirect)  | bool }}"
+        allow_emails:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowEmails']             | default(allow_emails) }}"
+        allow_groups:               "{{ ir_annotations['cfzt.cloudflare.com/access.allowGroups']             | default(allow_groups) }}"
+        http_only_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.httpOnlyCookieAttribute'] | default(http_only_cookie_attribute) | bool }}"
+        same_site_cookie_attribute: "{{ ir_annotations['cfzt.cloudflare.com/access.sameSiteCookieAttribute'] | default(same_site_cookie_attribute) }}"
+        create_service_token:       "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.enabled']           | default(create_service_token)       | bool }}"
+        service_token_duration:     "{{ ir_annotations['cfzt.cloudflare.com/serviceToken.duration']          | default(service_token_duration) }}"
+        origin_service:             "{{ ir_annotations['cfzt.cloudflare.com/origin.url']                    | default(origin_service) }}"
+        no_tls_verify:              "{{ ir_annotations['cfzt.cloudflare.com/origin.noTLSVerify']             | default(no_tls_verify)              | bool }}"
 
     # Step 3c: Resolve policy names to UUIDs.
     # Done in kube_worker so the CloudflareTask CR always carries resolved UUIDs.
@@ -374,7 +374,7 @@ template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
                 sessionDuration: "{{ session_duration }}"
                 allowGroups: "{{ allow_groups }}"
                 allowEmails: "{{ allow_emails }}"
-                  existingPolicyIds: "{{ resolved_policy_ids }}"
+                existingPolicyIds: "{{ resolved_policy_ids }}"
                 autoRedirectToIdentity: "{{ auto_redirect_to_identity }}"
                 enableBindingCookie: "{{ enable_binding_cookie }}"
                 httpOnlyCookieAttribute: "{{ http_only_cookie_attribute }}"
@@ -393,8 +393,8 @@ template_name: "{{ ir_annotations.get('cfzt.cloudflare.com/template', '') }}"
               dnsRecord:
                 enabled: "{{ dns_only_mode }}"
                 ipAddress: "{{ dns_target_ip }}"
-                  proxied: "{{ dns_proxied }}"
-                  ttl: "{{ dns_ttl }}"
+                proxied: "{{ dns_proxied }}"
+                ttl: "{{ dns_ttl }}"
             existingIds:
               appId: "{{ existing_app_id }}"
               serviceTokenId: "{{ existing_token_id }}"

@@ -13,11 +13,13 @@ rules:
     resources:
       - cloudflarezerotrusttenants
       - cloudflarezerotrustoperatorconfigs
+      - cloudflarezerotrusttemplates
     verbs: ["get", "list", "watch"]
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:
       - cloudflarezerotrusttenants/status
       - cloudflarezerotrustoperatorconfigs/status
+      - cloudflarezerotrusttemplates/status
     verbs: ["get", "patch", "update"]
   # CloudflareTask CRD – communication bus between kube_worker and cloudflare_worker
   - apiGroups: ["cfzt.cloudflare.com"]

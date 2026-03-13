@@ -33,16 +33,18 @@
         message: "{{ deployment_ready | ternary('Operator deployment is ready', 'Waiting for deployment to become ready') }}"
 
 - name: "Operator Config Status | Update CloudflareZeroTrustOperatorConfig status"
-  kubernetes.core.k8s_status:
+  kubernetes.core.k8s:
     api_version: cfzt.cloudflare.com/v1alpha1
     kind: CloudflareZeroTrustOperatorConfig
     name: "{{ operator_config.metadata.name }}"
     namespace: "{{ operator_namespace }}"
-    status:
-      observedGeneration: "{{ operator_config.metadata.generation }}"
-      lastAppliedTime: "{{ ansible_date_time.iso8601 }}"
-      deploymentReady: "{{ deployment_ready }}"
-      conditions: "{{ status_conditions }}"
+    subresource: status
+    definition:
+      status:
+        observedGeneration: "{{ operator_config.metadata.generation }}"
+        lastAppliedTime: "{{ ansible_date_time.iso8601 }}"
+        deploymentReady: "{{ deployment_ready }}"
+        conditions: "{{ status_conditions }}"
   register: status_update_result
   failed_when: false
 

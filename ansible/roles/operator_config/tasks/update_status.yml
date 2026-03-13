@@ -32,17 +32,28 @@
         reason: "{{ deployment_ready | ternary('DeploymentReady', 'DeploymentNotReady') }}"
         message: "{{ deployment_ready | ternary('Operator deployment is ready', 'Waiting for deployment to become ready') }}"
 
+- name: "Operator Config Status | Read service account token for status patch"
+  ansible.builtin.slurp:
+    src: /var/run/secrets/kubernetes.io/serviceaccount/token
+  register: k8s_sa_token
+  no_log: true
+
 - name: "Operator Config Status | Update CloudflareZeroTrustOperatorConfig status"
-  kubernetes.core.k8s_status:
-    api_version: cfzt.cloudflare.com/v1alpha1
-    kind: CloudflareZeroTrustOperatorConfig
-    name: "{{ operator_config.metadata.name }}"
-    namespace: "{{ operator_namespace }}"
-    status:
-      observedGeneration: "{{ operator_config.metadata.generation }}"
-      lastAppliedTime: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
-      deploymentReady: "{{ deployment_ready }}"
-      conditions: "{{ status_conditions }}"
+  ansible.builtin.uri:
+    url: "https://kubernetes.default.svc/apis/cfzt.cloudflare.com/v1alpha1/namespaces/{{ operator_namespace }}/cloudflarezerotrustoperatorconfigs/{{ operator_config.metadata.name }}/status"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ k8s_sa_token.content | b64decode }}"
+      Content-Type: "application/merge-patch+json"
+    body_format: json
+    body:
+      status:
+        observedGeneration: "{{ operator_config.metadata.generation }}"
+        lastAppliedTime: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+        deploymentReady: "{{ deployment_ready }}"
+        conditions: "{{ status_conditions }}"
+    ca_path: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    status_code: [200]
   register: status_update_result
   failed_when: false
 

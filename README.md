@@ -106,28 +106,27 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 
 The operator runs as **three coordinated Deployments** in the same namespace, all from the same container image, differentiated by the `ROLE` environment variable:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Kubernetes Cluster                                             │
-│                                                                 │
-│  ┌──────────────┐   ensures exist    ┌──────────────────────┐  │
-│  │   manager    │──────────────────▶ │   kube_worker        │  │
-│  │   pod        │                    │   pod                │  │
-│  │  (syncs      │──────────────────▶ │                      │  │
-│  │  OperatorCfg)│   ensures exist    │  reads HTTPRoutes    │  │
-│  └──────────────┘                    │  creates Tasks ──────┼──┼──┐
-│                                      └──────────────────────┘  │  │
-│                                                                 │  │
-│  ┌────────────────────────────┐       CloudflareTask CRs        │  │
-│  │  cloudflare_worker pod     │◀──────────────────────────────  │◀─┘
-│  │                            │       (work queue)              │
-│  │  claims + executes tasks   │────────────────────────────────▶│  Cloudflare API
-│  │  writes result IDs back    │                                 │  (tunnel/DNS/Access)
-│  └────────────────────────────┘                                 │
-│                                                                 │
-│  HTTPRoutes ◀── IDs written back by kube_worker                 │
-│  Tenant CRs + Secrets ◀── credentials                          │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph cluster["Kubernetes Cluster"]
+        manager["**manager** pod<br/>(syncs OperatorCfg)"]
+        kube["**kube_worker** pod<br/>reads HTTPRoutes<br/>creates Tasks"]
+        tasks[("CloudflareTask CRs<br/>(work queue)")]
+        cfworker["**cloudflare_worker** pod<br/>claims + executes tasks<br/>writes result IDs back"]
+        httproutes["HTTPRoutes<br/>(IDs written back)"]
+        tenants["Tenant CRs + Secrets<br/>(credentials)"]
+    end
+
+    cfapi["☁️ Cloudflare API<br/>(tunnel / DNS / Access)"]
+
+    manager -->|"ensures exist"| kube
+    manager -->|"ensures exist"| cfworker
+    kube -->|"creates"| tasks
+    tasks -->|"claimed by"| cfworker
+    cfworker -->|"calls"| cfapi
+    cfworker -->|"writes result IDs"| httproutes
+    tenants -.->|"credentials"| kube
+    tenants -.->|"credentials"| cfworker
 ```
 
 **`kube_worker`** is Kubernetes-only — it reads `HTTPRoute` annotations, detects changes via SHA256 hash, and creates `CloudflareTask` CRs as work items.

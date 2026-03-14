@@ -8,6 +8,10 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
 rules:
+  # kopf needs to watch CRDs for resource discovery
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
   # CRDs owned by this operator — kopf needs patch to store handler annotations
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:

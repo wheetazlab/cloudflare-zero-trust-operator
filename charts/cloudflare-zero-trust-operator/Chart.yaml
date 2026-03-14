@@ -5,8 +5,8 @@ description: >
   watching HTTPRoute resources and reconciling them with the Cloudflare API.
   The operator is packaged as a container running Ansible roles.
 type: application
-version: 0.1.32
-appVersion: "0.1.27"
+version: 0.1.33
+appVersion: "0.1.28"
 keywords:
   - cloudflare
   - zero-trust

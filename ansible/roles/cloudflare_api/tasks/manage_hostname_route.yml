@@ -99,7 +99,9 @@
 
 - name: Remove existing rule for this hostname
   ansible.builtin.set_fact:
-    filtered_ingress: "{{ existing_ingress | rejectattr('hostname', 'equalto', cf_hostname) | list }}"
+    filtered_ingress: >-
+      {{ (existing_ingress | selectattr('hostname', 'defined') | rejectattr('hostname', 'equalto', cf_hostname) | list)
+         + (existing_ingress | rejectattr('hostname', 'defined') | list) }}
 
 - name: Add new hostname rule
   ansible.builtin.set_fact:

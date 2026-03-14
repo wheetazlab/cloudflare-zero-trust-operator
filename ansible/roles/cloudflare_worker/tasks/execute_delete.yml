@@ -1,0 +1,66 @@
+---
+# cloudflare_worker — execute_delete.yml
+# Removes Cloudflare resources for a deleted HTTPRoute.
+# Called from claim_and_execute.yml when cfzt_task.spec.action == "delete".
+#
+# Variables (via cfzt_task):
+#   - cfzt_task.spec.accountId
+#   - cfzt_task.spec.credentialSecretRef
+#   - cfzt_task.spec.deleteIds.hostname
+#   - cfzt_task.spec.deleteIds.accessAppId
+#   - cfzt_task.spec.deleteIds.cnameRecordId
+#   - cfzt_task.spec.deleteIds.serviceTokenId
+#   - cfzt_task.spec.deleteIds.dnsRecordId
+#   - cfzt_task.spec.deleteIds.tunnelId
+#   - cfzt_task.spec.deleteIds.zoneId
+
+- name: Set delete task facts
+  ansible.builtin.set_fact:
+    del_account_id: "{{ cfzt_task.spec.accountId }}"
+    del_cred_ref: "{{ cfzt_task.spec.credentialSecretRef }}"
+    del_ids: "{{ cfzt_task.spec.deleteIds | default({}) }}"
+
+- name: Read Cloudflare API token for delete task
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ del_cred_ref.name }}"
+    namespace: "{{ del_cred_ref.namespace }}"
+  register: del_cred_secret
+
+- name: Fail if credential secret not found for delete task
+  ansible.builtin.fail:
+    msg: "Credential secret {{ del_cred_ref.namespace }}/{{ del_cred_ref.name }} not found"
+  when: del_cred_secret.resources | length == 0
+
+- name: Extract API token for delete task
+  ansible.builtin.set_fact:
+    del_api_token: "{{ del_cred_secret.resources[0].data[del_cred_ref.key | default('token')] | b64decode }}"
+  no_log: true
+
+- name: Execute Cloudflare resource deletion
+  include_role:
+    name: cloudflare_api
+    tasks_from: delete_resources.yml
+  vars:
+    cf_api_token: "{{ del_api_token }}"
+    cf_account_id: "{{ del_account_id }}"
+    cf_api_base: "{{ cloudflare_api_base | default('https://api.cloudflare.com/client/v4') }}"
+    delete_app_id: "{{ del_ids.accessAppId | default('') }}"
+    delete_token_id: "{{ del_ids.serviceTokenId | default('') }}"
+    delete_tunnel_id: "{{ del_ids.tunnelId | default('') }}"
+    delete_hostname: "{{ del_ids.hostname | default('') }}"
+    delete_dns_record_id: "{{ del_ids.cnameRecordId | default(del_ids.dnsRecordId | default('')) }}"
+    delete_zone_id: "{{ del_ids.zoneId | default('') }}"
+    # delete_policy_ids intentionally omitted — existing/reusable policies must not be deleted
+
+- name: Set empty cf_results for delete task (no IDs to write back)
+  ansible.builtin.set_fact:
+    cf_results: {}
+
+- name: Log delete execution complete
+  ansible.builtin.debug:
+    msg: >-
+      cloudflare_worker: delete task {{ ct_name }} executed —
+      removed hostname={{ del_ids.hostname | default('(none)') }},
+      appId={{ del_ids.accessAppId | default('(none)') }}

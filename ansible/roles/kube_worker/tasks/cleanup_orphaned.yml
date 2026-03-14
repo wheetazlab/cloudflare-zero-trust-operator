@@ -1,7 +1,15 @@
 ---
-# Cleanup orphaned state ConfigMaps (HTTPRoute no longer exists)
+# Cleanup orphaned state ConfigMaps (HTTPRoute no longer exists).
+# For each orphaned ConfigMap:
+#   1. Parse the saved Cloudflare IDs and tenant name.
+#   2. Create a delete CloudflareTask so cloudflare_worker removes the CF resources.
+#   3. Delete the ConfigMap (IDs are now carried by the task).
+# If the tenant cannot be identified, the ConfigMap is deleted without CF cleanup
+# (a warning is logged so the user can manually remove the CF resources).
+#
 # Inputs:
-#   - cfzt_httproutes: List of all HTTPRoutes with cfzt enabled
+#   - cfzt_httproutes: List of all cfzt-enabled HTTPRoutes
+#   - cfzt_tenants: List of all CloudflareZeroTrustTenant resources
 #   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
 
 - name: List all state ConfigMaps
@@ -43,20 +51,73 @@
     msg: "Orphaned: {{ orphaned_cms | map(attribute='metadata.name') | list }}"
   when: orphaned_cms | length > 0 and ansible_verbosity > 0
 
-- name: Delete orphaned state ConfigMaps
-  kubernetes.core.k8s:
-    api_version: v1
-    kind: ConfigMap
-    name: "{{ item.metadata.name }}"
-    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
-    state: absent
+# ─── Per-orphan: create delete CloudflareTask then remove ConfigMap ───────────
+
+- name: Schedule Cloudflare deletion for orphaned ConfigMap {{ orphaned_cm.metadata.name }}
+  when: orphaned_cms | length > 0
+  vars:
+    ocm_name: "{{ orphaned_cm.metadata.name }}"
+    ocm_cloudflare_ids: "{{ orphaned_cm.data.cloudflare_ids | default('{}') | from_json }}"
+    ocm_hostname: "{{ orphaned_cm.data.hostname | default('') }}"
+    ocm_tunnel_id: "{{ orphaned_cm.data.tunnel_id | default('') }}"
+    ocm_zone_id: "{{ orphaned_cm.data.zone_id | default('') }}"
+    ocm_tenant_name: "{{ orphaned_cm.data.tenant_name | default('') }}"
+    ocm_delete_task_name: "cfzt-delete-{{ orphaned_cm.metadata.name | replace('cfzt-', '', 1) }}"
+  block:
+    - name: Resolve tenant for {{ ocm_name }}
+      ansible.builtin.set_fact:
+        ocm_tenant: "{{ (cfzt_tenants | selectattr('metadata.name', 'equalto', ocm_tenant_name) | list | first) if ocm_tenant_name != '' else none }}"
+
+    - name: Warn when tenant not found for {{ ocm_name }}
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Tenant '{{ ocm_tenant_name }}' not found for orphaned ConfigMap {{ ocm_name }}.
+          Cloudflare resources will NOT be removed automatically — delete them manually.
+          Removing orphaned ConfigMap anyway.
+      when: ocm_tenant is none or ocm_tenant_name == ''
+
+    - name: Create delete CloudflareTask for {{ ocm_name }}
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: cfzt.cloudflare.com/v1alpha1
+          kind: CloudflareTask
+          metadata:
+            name: "{{ ocm_delete_task_name }}"
+            namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+            labels:
+              cfzt.cloudflare.com/tenant: "{{ ocm_tenant_name }}"
+              cfzt.cloudflare.com/action: delete
+          spec:
+            action: delete
+            accountId: "{{ ocm_tenant.spec.accountId }}"
+            credentialSecretRef:
+              name: "{{ ocm_tenant.spec.credentialRef.name }}"
+              namespace: "{{ ocm_tenant.metadata.namespace }}"
+              key: "{{ ocm_tenant.spec.credentialRef.key | default('token') }}"
+            deleteIds:
+              hostname: "{{ ocm_hostname }}"
+              accessAppId: "{{ ocm_cloudflare_ids.accessAppId | default('') }}"
+              cnameRecordId: "{{ ocm_cloudflare_ids.cnameRecordId | default('') }}"
+              serviceTokenId: "{{ ocm_cloudflare_ids.serviceTokenId | default('') }}"
+              dnsRecordId: "{{ ocm_cloudflare_ids.dnsRecordId | default('') }}"
+              tunnelId: "{{ ocm_tunnel_id }}"
+              zoneId: "{{ ocm_zone_id }}"
+      when: ocm_tenant is not none and ocm_tenant_name != ''
+
+    - name: Delete orphaned state ConfigMap {{ ocm_name }}
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ ocm_name }}"
+        namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+        state: absent
   loop: "{{ orphaned_cms }}"
   loop_control:
-    label: "{{ item.metadata.name }}"
-  when: orphaned_cms | length > 0
-  register: cleanup_results
+    loop_var: orphaned_cm
+    label: "{{ orphaned_cm.metadata.name }}"
 
 - name: Log cleanup results
   ansible.builtin.debug:
-    msg: "Cleaned up {{ orphaned_cms | length }} orphaned state ConfigMap(s)"
+    msg: "Scheduled cleanup for {{ orphaned_cms | length }} orphaned state ConfigMap(s)"
   when: orphaned_cms | length > 0

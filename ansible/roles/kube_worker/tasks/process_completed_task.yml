@@ -13,27 +13,32 @@
 - name: Extract result data from task
   ansible.builtin.set_fact:
     ct_name: "{{ cfzt_task.metadata.name }}"
-    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name }}"
-    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace }}"
-    ct_route_uid: "{{ cfzt_task.spec.httprouteRef.uid }}"
+    ct_action: "{{ cfzt_task.spec.action | default('reconcile') }}"
+    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name | default('') }}"
+    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace | default('') }}"
+    ct_route_uid: "{{ cfzt_task.spec.httprouteRef.uid | default('') }}"
     ct_result: "{{ cfzt_task.status.result | default({}) }}"
     ct_annotation_hash: "{{ cfzt_task.metadata.annotations['cfzt.cloudflare.com/annotation-hash'] | default('') }}"
+    ct_hostname: "{{ cfzt_task.spec.hostname | default('') }}"
+    ct_tunnel_id: "{{ cfzt_task.spec.tunnelId | default('') }}"
+    ct_zone_id: "{{ cfzt_task.spec.zoneId | default('') }}"
+    ct_tenant_name: "{{ cfzt_task.spec.tenantRef.name | default('') }}"
     ct_service_token_created: "{{ cfzt_task.status.result.serviceTokenCreated | default(false) }}"
     ct_service_token_client_id: "{{ cfzt_task.status.result.serviceTokenClientId | default('') }}"
     ct_service_token_client_secret: "{{ cfzt_task.status.result.serviceTokenClientSecret | default('') }}"
 
 - name: Log result processing
   ansible.builtin.debug:
-    msg: "Processing Completed task {{ ct_name }} for HTTPRoute {{ ct_route_namespace }}/{{ ct_route_name }}"
+    msg: "Processing Completed task {{ ct_name }} (action={{ ct_action }}) for HTTPRoute {{ ct_route_namespace }}/{{ ct_route_name }}"
 
-# ─── Patch HTTPRoute annotations ──────────────────────────────────────────────
+# ─── Patch HTTPRoute annotations (reconcile tasks only) ───────────────────────
 
 - name: Build annotation patch for tunnel mode results
   ansible.builtin.set_fact:
     route_annotation_patch: >-
       {{
         {
-          'cfzt.cloudflare.com/hostnameRouteId':  ct_result.tunnelRouteId  | default(''),
+          'cfzt.cloudflare.com/hostnameRouteId':  ct_result.hostnameRouteId | default(''),
           'cfzt.cloudflare.com/cnameRecordId':    ct_result.cnameRecordId  | default(''),
           'cfzt.cloudflare.com/lastReconcile':    now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')
         }
@@ -44,6 +49,7 @@
         | combine({'cfzt.cloudflare.com/dnsRecordId':     ct_result.dnsRecordId     | default('')} if ct_result.dnsRecordId    is defined else {})
         | combine({'cfzt.cloudflare.com/dnsRecordIp':     ct_result.dnsRecordIp     | default('')} if ct_result.dnsRecordIp    is defined else {})
       }}
+  when: ct_action == 'reconcile'
 
 - name: Patch HTTPRoute annotations with results
   kubernetes.core.k8s:
@@ -55,8 +61,9 @@
     definition:
       metadata:
         annotations: "{{ route_annotation_patch }}"
+  when: ct_action == 'reconcile'
 
-# ─── Create K8s Secret for service token (only if newly created by CF) ────────
+# ─── Create K8s Secret for service token (reconcile tasks only) ───────────────
 
 - name: Create Kubernetes Secret for Service Token
   kubernetes.core.k8s:
@@ -72,11 +79,12 @@
         client_id: "{{ ct_service_token_client_id }}"
         client_secret: "{{ ct_service_token_client_secret }}"
   when:
+    - ct_action == 'reconcile'
     - ct_service_token_created | bool
     - ct_service_token_client_id | length > 0
     - ct_service_token_client_secret | length > 0
 
-# ─── Update HTTPRoute state ConfigMap ────────────────────────────────────────
+# ─── Update HTTPRoute state ConfigMap (reconcile tasks only) ──────────────────
 
 - name: Update HTTPRoute state
   include_tasks: update_state.yml
@@ -85,9 +93,14 @@
     ir_name: "{{ ct_route_name }}"
     ir_namespace: "{{ ct_route_namespace }}"
     ir_uid: "{{ ct_route_uid }}"
+    ir_hostname: "{{ ct_hostname }}"
+    ir_tunnel_id: "{{ ct_tunnel_id }}"
+    ir_zone_id: "{{ ct_zone_id }}"
+    ir_tenant_name: "{{ ct_tenant_name }}"
     current_annotation_hash: "{{ ct_annotation_hash }}"
     cloudflare_ids: "{{ ct_result }}"
     operator_namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
+  when: ct_action == 'reconcile'
 
 # ─── Delete the CloudflareTask CR ─────────────────────────────────────────────
 

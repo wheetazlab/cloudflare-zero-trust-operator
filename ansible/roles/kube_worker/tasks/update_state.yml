@@ -5,6 +5,10 @@
 #   - ir_name: HTTPRoute name
 #   - ir_namespace: HTTPRoute namespace
 #   - ir_uid: HTTPRoute UID
+#   - ir_hostname: Public hostname (e.g. myapp.example.com)
+#   - ir_tunnel_id: Cloudflare Tunnel ID
+#   - ir_zone_id: Cloudflare Zone ID
+#   - ir_tenant_name: Name of the CloudflareZeroTrustTenant
 #   - current_annotation_hash: Hash of current annotations
 #   - cloudflare_ids: Dict of Cloudflare resource IDs
 #   - operator_namespace: Namespace where operator runs (default: cloudflare-zero-trust)
@@ -27,6 +31,7 @@
           app.kubernetes.io/component: state-tracker
           cfzt.cloudflare.com/httproute-namespace: "{{ ir_namespace }}"
           cfzt.cloudflare.com/httproute-name: "{{ ir_name }}"
+          cfzt.cloudflare.com/tenant: "{{ ir_tenant_name | default('') }}"
         annotations:
           cfzt.cloudflare.com/httproute-uid: "{{ ir_uid }}"
       data:
@@ -35,6 +40,10 @@
         last_sync_time: "{{ sync_timestamp }}"
         httproute_namespace: "{{ ir_namespace }}"
         httproute_name: "{{ ir_name }}"
+        hostname: "{{ ir_hostname | default('') }}"
+        tunnel_id: "{{ ir_tunnel_id | default('') }}"
+        zone_id: "{{ ir_zone_id | default('') }}"
+        tenant_name: "{{ ir_tenant_name | default('') }}"
   register: state_cm_update
 
 - name: Debug state update

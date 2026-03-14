@@ -30,8 +30,6 @@ spec:
               required:
                 - httprouteRef
                 - tenantRef
-                - hostname
-                - operations
               properties:
 
                 # Source HTTPRoute
@@ -74,6 +72,39 @@ spec:
                       default: token
 
                 # Core routing context
+                action:
+                  type: string
+                  description: "Action to perform: reconcile (create/update) or delete"
+                  enum: ["reconcile", "delete"]
+                  default: "reconcile"
+
+                # IDs of Cloudflare resources to delete (only used when action=delete)
+                deleteIds:
+                  type: object
+                  description: "Cloudflare resource IDs to clean up when action=delete"
+                  properties:
+                    hostname:
+                      type: string
+                      description: "Public hostname to remove from tunnel ingress rules"
+                    accessAppId:
+                      type: string
+                      description: "Access Application ID to delete"
+                    cnameRecordId:
+                      type: string
+                      description: "CNAME DNS record ID to delete"
+                    serviceTokenId:
+                      type: string
+                      description: "Service Token ID to delete"
+                    dnsRecordId:
+                      type: string
+                      description: "DNS A record ID to delete (dns-only mode)"
+                    tunnelId:
+                      type: string
+                      description: "Tunnel ID to remove hostname ingress rule from"
+                    zoneId:
+                      type: string
+                      description: "Cloudflare Zone ID for the DNS record"
+
                 hostname:
                   type: string
                   description: "Public hostname to manage (e.g. myapp.example.com)"

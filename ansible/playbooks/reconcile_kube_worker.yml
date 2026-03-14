@@ -65,3 +65,12 @@
         operator_namespace: "{{ operator_namespace }}"
       loop: "{{ cfzt_tenants }}"
       when: cfzt_tenants is defined and cfzt_tenants | length > 0
+
+    # Phase 6: Delete Cloudflare resources for removed HTTPRoutes
+    # Must run after Phase 5 so cfzt_httproutes reflects the current live set.
+    - name: Cleanup orphaned state and schedule Cloudflare deletions
+      include_role:
+        name: kube_worker
+        tasks_from: cleanup_orphaned.yml
+      vars:
+        operator_namespace: "{{ operator_namespace }}"

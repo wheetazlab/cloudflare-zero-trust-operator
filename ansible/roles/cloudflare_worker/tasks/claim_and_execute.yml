@@ -9,9 +9,10 @@
 - name: Set task identity facts
   ansible.builtin.set_fact:
     ct_name: "{{ cfzt_task.metadata.name }}"
-    ct_hostname: "{{ cfzt_task.spec.hostname }}"
-    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name }}"
-    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace }}"
+    ct_action: "{{ cfzt_task.spec.action | default('reconcile') }}"
+    ct_hostname: "{{ cfzt_task.spec.hostname | default('') }}"
+    ct_route_name: "{{ cfzt_task.spec.httprouteRef.name | default('') }}"
+    ct_route_namespace: "{{ cfzt_task.spec.httprouteRef.namespace | default('') }}"
 
 - name: Claim task — patch status to InProgress
   kubernetes.core.k8s:
@@ -29,14 +30,19 @@
 
 - name: Log task claimed
   ansible.builtin.debug:
-    msg: "cloudflare_worker: claimed task {{ ct_name }} ({{ ct_route_namespace }}/{{ ct_route_name }})"
+    msg: "cloudflare_worker: claimed task {{ ct_name }} (action={{ ct_action }}, route={{ ct_route_namespace }}/{{ ct_route_name }})"
 
 # ─── Execute all Cloudflare API operations ────────────────────────────────────
 
 - name: Execute Cloudflare operations for task
   block:
-    - name: Execute Cloudflare API operations
+    - name: Execute Cloudflare delete operations
+      include_tasks: execute_delete.yml
+      when: ct_action == 'delete'
+
+    - name: Execute Cloudflare reconcile operations
       include_tasks: execute_task.yml
+      when: ct_action != 'delete'
 
     - name: Report success
       include_tasks: report_result.yml

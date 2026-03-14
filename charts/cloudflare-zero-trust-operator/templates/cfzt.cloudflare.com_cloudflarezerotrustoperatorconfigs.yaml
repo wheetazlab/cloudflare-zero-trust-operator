@@ -3,6 +3,8 @@ kind: CustomResourceDefinition
 metadata:
   name: cloudflarezerotrustoperatorconfigs.cfzt.cloudflare.com
   annotations:
+    helm.sh/resource-policy: keep
+  annotations:
     controller-gen.kubebuilder.io/version: v0.11.1
 spec:
   group: cfzt.cloudflare.com

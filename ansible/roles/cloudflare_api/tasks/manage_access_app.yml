@@ -56,6 +56,35 @@
     access_app_payload: "{{ access_app_payload | combine({'custom_non_identity_deny_url': cf_custom_non_identity_deny_url}) }}"
   when: cf_custom_non_identity_deny_url is defined and cf_custom_non_identity_deny_url | length > 0
 
+# Lookup existing app by domain when no ID is known (idempotent upsert)
+- name: Look up existing Access Applications (skip if ID already known)
+  ansible.builtin.uri:
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    status_code: [200]
+    return_content: true
+  register: list_apps_response
+  retries: 3
+  delay: 5
+  until: list_apps_response.status == 200
+  when: cf_app_id is not defined or cf_app_id == ""
+
+- name: Resolve Access App ID from lookup
+  ansible.builtin.set_fact:
+    resolved_app_id: >-
+      {{ ((list_apps_response.json.result | default([]))
+          | selectattr('domain', 'equalto', cf_app_domain)
+          | map(attribute='id') | list | first) | default('') }}
+  when: cf_app_id is not defined or cf_app_id == ""
+
+- name: Use known Access App ID (skip lookup)
+  ansible.builtin.set_fact:
+    resolved_app_id: "{{ cf_app_id }}"
+  when: cf_app_id is defined and cf_app_id != ""
+
 - name: Create Access Application
   ansible.builtin.uri:
     url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps"
@@ -71,11 +100,11 @@
   retries: 3
   delay: 5
   until: create_app_response.status in [200, 201]
-  when: cf_app_id is not defined or cf_app_id == ""
+  when: resolved_app_id == ""
 
 - name: Update Access Application
   ansible.builtin.uri:
-    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ cf_app_id }}"
+    url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ resolved_app_id }}"
     method: PUT
     headers:
       Authorization: "Bearer {{ cf_api_token }}"
@@ -88,7 +117,7 @@
   retries: 3
   delay: 5
   until: update_app_response.status in [200, 201]
-  when: cf_app_id is defined and cf_app_id != ""
+  when: resolved_app_id != ""
 
 - name: Set application result (create)
   ansible.builtin.set_fact:
@@ -98,17 +127,17 @@
       app_name: "{{ cf_app_name }}"
       app_domain: "{{ cf_app_domain }}"
       created: true
-  when: cf_app_id is not defined or cf_app_id == ""
+  when: resolved_app_id == ""
 
 - name: Set application result (update)
   ansible.builtin.set_fact:
     access_app_result:
       success: true
-      app_id: "{{ cf_app_id }}"
+      app_id: "{{ resolved_app_id }}"
       app_name: "{{ cf_app_name }}"
       app_domain: "{{ cf_app_domain }}"
       created: false
-  when: cf_app_id is defined and cf_app_id != ""
+  when: resolved_app_id != ""
 
 - name: Display Access Application result
   ansible.builtin.debug:

@@ -33,7 +33,9 @@
 - name: Parse existing tunnel configuration
   ansible.builtin.set_fact:
     existing_config: "{{ tunnel_config_response.json.result.config if tunnel_config_response.status == 200 else {} }}"
-    existing_ingress: "{{ tunnel_config_response.json.result.config.ingress | default([]) if tunnel_config_response.status == 200 else [] }}"
+    existing_ingress: >-
+      {%- set raw = tunnel_config_response.json.result.config.ingress | default([]) if tunnel_config_response.status == 200 else [] -%}
+      {{ [raw] if raw is mapping else raw | list }}
 
 - name: Build hostname ingress rule
   ansible.builtin.set_fact:

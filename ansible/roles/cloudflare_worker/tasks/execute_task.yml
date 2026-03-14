@@ -55,10 +55,6 @@
     name: cloudflare_api
     tasks_from: manage_hostname_route.yml
   vars:
-    cf_api_token: "{{ cf_api_token }}"
-    cf_account_id: "{{ cf_account_id }}"
-    cf_tunnel_id: "{{ cf_tunnel_id }}"
-    cf_hostname: "{{ cf_hostname }}"
     cf_origin_service: "{{ cf_ops.tunnelRoute.originService }}"
     cf_api_base: "{{ cloudflare_api_base }}"
     cf_origin_uses_https: "{{ cf_ops.tunnelRoute.originService | default('') is match('^https://') }}"
@@ -83,10 +79,6 @@
     name: cloudflare_api
     tasks_from: manage_tunnel_cname.yml
   vars:
-    cf_api_token: "{{ cf_api_token }}"
-    cf_zone_id: "{{ cf_zone_id }}"
-    cf_hostname: "{{ cf_hostname }}"
-    cf_tunnel_id: "{{ cf_tunnel_id }}"
     cf_api_base: "{{ cloudflare_api_base }}"
     cf_existing_cname_id: "{{ cf_existing.cnameRecordId | default('') }}"
   when: cf_ops.cnameDns.enabled | default(false) | bool and cf_zone_id | length > 0
@@ -103,8 +95,6 @@
     name: cloudflare_api
     tasks_from: manage_access_app.yml
   vars:
-    cf_api_token: "{{ cf_api_token }}"
-    cf_account_id: "{{ cf_account_id }}"
     cf_app_name: "{{ ct_route_name }}"
     cf_app_domain: "{{ cf_hostname }}"
     cf_app_id: "{{ cf_existing.appId | default('') }}"
@@ -154,8 +144,6 @@
         name: cloudflare_api
         tasks_from: manage_access_policy.yml
       vars:
-        cf_api_token: "{{ cf_api_token }}"
-        cf_account_id: "{{ cf_account_id }}"
         cf_app_id: "{{ access_app_result.app_id }}"
         cf_policy_name: "{{ ct_route_name }}-allow-policy"
         cf_allow_groups: "{{ access_allow_groups }}"
@@ -177,8 +165,6 @@
     name: cloudflare_api
     tasks_from: manage_service_token.yml
   vars:
-    cf_api_token: "{{ cf_api_token }}"
-    cf_account_id: "{{ cf_account_id }}"
     cf_token_name: "{{ ct_route_name }}-service-token"
     cf_token_id: "{{ cf_existing.serviceTokenId | default('') }}"
     cf_api_base: "{{ cloudflare_api_base }}"
@@ -204,9 +190,6 @@
     name: cloudflare_api
     tasks_from: manage_dns_record.yml
   vars:
-    cf_api_token: "{{ cf_api_token }}"
-    cf_zone_id: "{{ cf_zone_id }}"
-    cf_hostname: "{{ cf_hostname }}"
     cf_ip_address: "{{ cf_ops.dnsRecord.ipAddress }}"
     cf_api_base: "{{ cloudflare_api_base }}"
     cf_proxied: "{{ cf_ops.dnsRecord.proxied | default(false) }}"

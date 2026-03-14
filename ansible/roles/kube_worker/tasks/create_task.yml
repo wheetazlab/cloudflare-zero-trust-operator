@@ -80,6 +80,20 @@
         origin_service: "{{ template_spec.originService.url | default(base_template_spec.originService.url | default('')) }}"
         http_redirect: "{{ template_spec.originService.httpRedirect | default(base_template_spec.originService.httpRedirect | default(true)) }}"
 
+    - name: Auto-derive origin service from HTTPRoute backendRefs if not set by template
+      ansible.builtin.set_fact:
+        origin_service: >-
+          {{
+            'http://' +
+            httproute.spec.rules[0].backendRefs[0].name + '.' +
+            httproute.metadata.namespace + '.svc.cluster.local:' +
+            (httproute.spec.rules[0].backendRefs[0].port | string)
+          }}
+      when:
+        - origin_service | length == 0
+        - httproute.spec.rules | default([]) | length > 0
+        - httproute.spec.rules[0].backendRefs | default([]) | length > 0
+
     - name: Merge origin TLS settings (template > base template > hardcoded defaults)
       ansible.builtin.set_fact:
         no_tls_verify: "{{ template_spec.originService.originTLS.noTLSVerify | default(base_template_spec.originService.originTLS.noTLSVerify | default(false)) }}"

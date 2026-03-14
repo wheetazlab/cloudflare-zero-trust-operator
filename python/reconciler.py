@@ -9,7 +9,7 @@ import datetime
 import ipaddress
 import logging
 
-import kopf
+import kopf # pyright: ignore[reportMissingImports]
 
 from config import (
     ANNOTATION_PREFIX,
@@ -427,8 +427,8 @@ def cleanup_orphaned_states(
             continue
 
         # Check if the HTTPRoute still exists and is still enabled
-        from kubernetes import client as k8s_client
-        from kubernetes.client.rest import ApiException as K8sApiException
+        from kubernetes import client as k8s_client # pyright: ignore[reportMissingImports]
+        from kubernetes.client.rest import ApiException as K8sApiException # pyright: ignore[reportMissingImports]
         crd_api = k8s_client.CustomObjectsApi()
         try:
             route = crd_api.get_namespaced_custom_object(

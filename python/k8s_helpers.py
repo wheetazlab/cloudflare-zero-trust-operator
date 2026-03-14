@@ -12,8 +12,8 @@ import logging
 import os
 from typing import Any
 
-from kubernetes import client as k8s
-from kubernetes.client.rest import ApiException
+from kubernetes import client as k8s  # pyright: ignore[reportMissingImports]
+from kubernetes.client.rest import ApiException # pyright: ignore[reportMissingImports]
 
 logger = logging.getLogger("cfzt.k8s_helpers")
 

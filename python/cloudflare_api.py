@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import cloudflare as cf_errors
-from cloudflare import Cloudflare
+import cloudflare as cf_errors # type: ignore
+from cloudflare import Cloudflare # type: ignore
 
 logger = logging.getLogger("cfzt.cloudflare_api")
 

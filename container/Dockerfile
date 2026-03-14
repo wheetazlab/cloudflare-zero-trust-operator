@@ -19,7 +19,7 @@ COPY container/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Run as non-root
-RUN useradd --create-home --uid 1000 operator
+RUN useradd --create-home --uid 1000 --no-user-group operator
 USER operator
 
 ENTRYPOINT ["/entrypoint.sh"]

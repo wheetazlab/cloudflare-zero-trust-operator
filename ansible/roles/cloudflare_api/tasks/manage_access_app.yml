@@ -41,6 +41,16 @@
       app_launcher_visible: "{{ cf_app_launcher_visible | default(true) }}"
       service_auth_401_redirect: "{{ cf_service_auth_401_redirect | default(false) }}"
 
+- name: Add reusable policy references to app payload
+  ansible.builtin.set_fact:
+    access_app_payload: >-
+      {%- set refs = [] -%}
+      {%- for pid in cf_policy_ids | default([]) -%}
+        {%- set _ = refs.append({'id': pid}) -%}
+      {%- endfor -%}
+      {{ access_app_payload | combine({'policies': refs}) }}
+  when: cf_policy_ids | default([]) | length > 0
+
 - name: Add custom deny message if provided
   ansible.builtin.set_fact:
     access_app_payload: "{{ access_app_payload | combine({'custom_deny_message': cf_custom_deny_message}) }}"

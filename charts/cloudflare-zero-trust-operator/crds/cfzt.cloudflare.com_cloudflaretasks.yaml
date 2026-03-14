@@ -252,8 +252,16 @@ spec:
                     accessAppId:
                       type: string
                     accessPolicyIds:
-                      type: string
+                      type: array
+                      items:
+                        type: string
                     serviceTokenId:
+                      type: string
+                    serviceTokenCreated:
+                      type: boolean
+                    serviceTokenClientId:
+                      type: string
+                    serviceTokenClientSecret:
                       type: string
                     serviceTokenSecretName:
                       type: string

@@ -8,29 +8,41 @@
 #   - cf_results: dict of collected result IDs
 #   - operator_namespace / worker_pod_name
 
+# CRD has subresources.status, so status MUST be patched via the /status endpoint.
+# kubernetes.core.k8s: state: patched targets the main resource and the API server
+# silently ignores any status fields, leaving phase unset and breaking collect_results.
+- name: Read service account token for status patch
+  ansible.builtin.slurp:
+    src: /var/run/secrets/kubernetes.io/serviceaccount/token
+  register: cf_worker_sa_token
+  no_log: true
+
 - name: Patch CloudflareTask status to Completed
-  kubernetes.core.k8s:
-    state: patched
-    api_version: cfzt.cloudflare.com/v1alpha1
-    kind: CloudflareTask
-    name: "{{ ct_name }}"
-    namespace: "{{ operator_namespace | default('cloudflare-zero-trust') }}"
-    definition:
+  ansible.builtin.uri:
+    url: "https://kubernetes.default.svc/apis/cfzt.cloudflare.com/v1alpha1/namespaces/{{ operator_namespace | default('cloudflare-zero-trust') }}/cloudflaretasks/{{ ct_name }}/status"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ cf_worker_sa_token.content | b64decode }}"
+      Content-Type: "application/merge-patch+json"
+    body_format: json
+    body:
       status:
         phase: Completed
         message: "All Cloudflare operations succeeded"
         workerPod: "{{ worker_pod_name }}"
         result:
-          tunnelRouteId: "{{ cf_results.tunnelRouteId | default('') }}"
+          hostnameRouteId: "{{ cf_results.tunnelRouteId | default('') }}"
           cnameRecordId: "{{ cf_results.cnameRecordId | default('') }}"
           accessAppId: "{{ cf_results.accessAppId | default('') }}"
-          accessPolicyIds: "{{ cf_results.accessPolicyIds | default('') }}"
+          accessPolicyIds: "{{ cf_results.accessPolicyIds | default([]) }}"
           serviceTokenId: "{{ cf_results.serviceTokenId | default('') }}"
           serviceTokenCreated: "{{ cf_results.serviceTokenCreated | default(false) }}"
           serviceTokenClientId: "{{ cf_results.serviceTokenClientId | default('') }}"
           serviceTokenClientSecret: "{{ cf_results.serviceTokenClientSecret | default('') }}"
           dnsRecordId: "{{ cf_results.dnsRecordId | default('') }}"
           dnsRecordIp: "{{ cf_results.dnsRecordIp | default('') }}"
+    ca_path: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    status_code: [200]
 
 - name: Log task completion
   ansible.builtin.debug:

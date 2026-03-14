@@ -136,8 +136,8 @@
   block:
     - name: Parse allow groups
       ansible.builtin.set_fact:
-        access_allow_groups: "{{ (cf_ops.accessApp.allowGroups | default('')).split(',') | map('trim') | select | list }}"
-        access_allow_emails: "{{ (cf_ops.accessApp.allowEmails | default('')).split(',') | map('trim') | select | list }}"
+        access_allow_groups: "{{ cf_ops.accessApp.allowGroups | default([]) }}"
+        access_allow_emails: "{{ cf_ops.accessApp.allowEmails | default([]) }}"
 
     - name: Create/Update Access Policy
       include_role:
@@ -148,12 +148,12 @@
         cf_policy_name: "{{ ct_route_name }}-allow-policy"
         cf_allow_groups: "{{ access_allow_groups }}"
         cf_allow_emails: "{{ access_allow_emails }}"
-        cf_policy_id: ""
+        cf_policy_id: "{{ (cf_existing.accessPolicyIds | default('')).split(',') | first | trim }}"
         cf_api_base: "{{ cloudflare_api_base }}"
 
     - name: Record Access Policy result
       ansible.builtin.set_fact:
-        cf_results: "{{ cf_results | combine({'accessPolicyIds': access_policy_result.policy_id}) }}"
+        cf_results: "{{ cf_results | combine({'accessPolicyIds': [access_policy_result.policy_id]}) }}"
   when:
     - cf_ops.accessApp.enabled | default(false) | bool
     - cf_ops.accessApp.existingPolicyIds | default('') | length == 0

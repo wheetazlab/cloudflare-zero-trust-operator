@@ -65,10 +65,13 @@
         status_code: [200, 404]
         return_content: true
       register: tunnel_config_response
+      retries: 3
+      delay: 5
+      until: tunnel_config_response.status in [200, 404]
 
     - name: Remove hostname from ingress rules
       ansible.builtin.set_fact:
-        updated_ingress: "{{ tunnel_config_response.json.result.config.ingress | rejectattr('hostname', 'equalto', delete_hostname) | list }}"
+        updated_ingress: "{{ tunnel_config_response.json.result.config.ingress | default([]) | rejectattr('hostname', 'equalto', delete_hostname) | list }}"
       when: tunnel_config_response.status == 200
 
     - name: Update tunnel configuration

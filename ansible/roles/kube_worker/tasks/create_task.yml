@@ -231,6 +231,7 @@
         existing_token_id: "{{ ir_annotations['cfzt.cloudflare.com/serviceTokenId'] | default('') }}"
         existing_cname_id: "{{ ir_annotations['cfzt.cloudflare.com/cnameRecordId'] | default('') }}"
         existing_dns_record_id: "{{ ir_annotations['cfzt.cloudflare.com/dnsRecordId'] | default('') }}"
+        existing_policy_ids: "{{ ir_annotations['cfzt.cloudflare.com/accessPolicyIds'] | default('') }}"
         annotation_dns_ip: "{{ ir_annotations['cfzt.cloudflare.com/dnsIp'] | default('') }}"
 
     - name: Validate hostname annotation is present
@@ -413,6 +414,7 @@
               serviceTokenId: "{{ existing_token_id }}"
               cnameRecordId: "{{ existing_cname_id }}"
               dnsRecordId: "{{ existing_dns_record_id }}"
+              accessPolicyIds: "{{ existing_policy_ids }}"
       register: task_apply_result
 
     - name: Reset task status to Pending when spec changed

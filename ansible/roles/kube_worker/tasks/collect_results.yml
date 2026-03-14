@@ -52,7 +52,7 @@
   ansible.builtin.debug:
     msg: >-
       WARNING: CloudflareTask {{ item.metadata.name }} FAILED —
-      HTTPRoute {{ item.spec.httprouteRef.namespace }}/{{ item.spec.httprouteRef.name }}:
+      {% if item.spec.httprouteRef is defined %}HTTPRoute {{ item.spec.httprouteRef.namespace }}/{{ item.spec.httprouteRef.name }}{% else %}action={{ item.spec.action | default('unknown') }}{% endif %}:
       {{ item.status.message | default('no message') }}
   loop: "{{ failed_tasks }}"
   loop_control:

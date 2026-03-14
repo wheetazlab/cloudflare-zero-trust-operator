@@ -13,8 +13,6 @@
     ocm_tunnel_id: "{{ orphaned_cm.data.tunnel_id | default('') }}"
     ocm_zone_id: "{{ orphaned_cm.data.zone_id | default('') }}"
     ocm_tenant_name: "{{ orphaned_cm.data.tenant_name | default('') }}"
-    ocm_httproute_name: "{{ orphaned_cm.data.httproute_name | default('') }}"
-    ocm_httproute_namespace: "{{ orphaned_cm.data.httproute_namespace | default('') }}"
     ocm_delete_task_name: "cfzt-delete-{{ orphaned_cm.metadata.name | replace('cfzt-', '', 1) }}"
 
 - name: Resolve tenant for {{ ocm_name }}
@@ -43,12 +41,6 @@
           cfzt.cloudflare.com/action: delete
       spec:
         action: delete
-        httprouteRef:
-          name: "{{ ocm_httproute_name }}"
-          namespace: "{{ ocm_httproute_namespace }}"
-        tenantRef:
-          name: "{{ ocm_tenant_name }}"
-          namespace: "{{ ocm_tenant.metadata.namespace }}"
         accountId: "{{ ocm_tenant.spec.accountId }}"
         credentialSecretRef:
           name: "{{ ocm_tenant.spec.credentialRef.name }}"

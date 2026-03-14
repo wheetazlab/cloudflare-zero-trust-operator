@@ -12,44 +12,18 @@ rules:
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:
       - cloudflarezerotrusttenants
-      - cloudflarezerotrustoperatorconfigs
       - cloudflarezerotrusttemplates
     verbs: ["get", "list", "watch"]
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:
       - cloudflarezerotrusttenants/status
-      - cloudflarezerotrustoperatorconfigs/status
       - cloudflarezerotrusttemplates/status
     verbs: ["get", "patch", "update"]
-  # CloudflareTask CRD – communication bus between kube_worker and cloudflare_worker
-  - apiGroups: ["cfzt.cloudflare.com"]
-    resources:
-      - cloudflaretasks
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["cfzt.cloudflare.com"]
-    resources:
-      - cloudflaretasks/status
-    verbs: ["get", "patch", "update"]
-  # Self-update + worker Deployment management
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    resourceNames:
-      - {{ include "cloudflare-zero-trust-operator.fullname" . | quote }}
-      - "cloudflare-zero-trust-kube-worker"
-      - "cloudflare-zero-trust-cloudflare-worker"
-    verbs: ["get", "list", "patch", "update"]
-  # The manager needs to create (not just patch) worker Deployments on first boot
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["create"]
   # Gateway API – watches HTTPRoutes to build tunnel routing
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
     verbs: ["get", "list", "watch", "patch", "update"]
   # Core resources
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
@@ -59,6 +33,9 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
 ---
 # ClusterRoleBinding: operator ClusterRole → ServiceAccount
 apiVersion: rbac.authorization.k8s.io/v1
@@ -71,34 +48,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ include "cloudflare-zero-trust-operator.fullname" . }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "cloudflare-zero-trust-operator.serviceAccountName" . }}
-    namespace: {{ include "cloudflare-zero-trust-operator.namespace" . }}
----
-# ClusterRole: read-only secret access (separate role for least-privilege clarity)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
-  labels:
-    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
----
-# ClusterRoleBinding: secrets read role → ServiceAccount
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
-  labels:
-    {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-secrets
 subjects:
   - kind: ServiceAccount
     name: {{ include "cloudflare-zero-trust-operator.serviceAccountName" . }}

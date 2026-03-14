@@ -24,21 +24,15 @@ namespaceOverride: ""
 
 # -------------------------------------------------------------------
 # Operator runtime switches
-# These become environment variables in the operator container.
+# These become environment variables in the kopf operator container.
 # -------------------------------------------------------------------
 operator:
   # Comma-separated list of namespaces to watch for HTTPRoutes.
   # Leave empty to watch ALL namespaces (cluster-wide).
   watchNamespaces: ""
 
-  # How often (in seconds) the operator polls Cloudflare and reconciles.
-  pollIntervalSeconds: 60
-
   # Log verbosity: DEBUG | INFO | WARNING | ERROR
   logLevel: INFO
-
-  # Cloudflare REST API base URL – override only if using a proxy/mock.
-  cloudflareApiBase: "https://api.cloudflare.com/client/v4"
 
   # Any extra environment variables to inject into the operator container.
   # Useful for proxy settings, tracing endpoints, etc.
@@ -49,8 +43,6 @@ operator:
 
 # -------------------------------------------------------------------
 # Replica count
-# The CloudflareZeroTrustOperatorConfig CRD can also control this
-# at runtime without a Helm upgrade.
 # -------------------------------------------------------------------
 replicaCount: 1
 

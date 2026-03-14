@@ -17,12 +17,10 @@ spec:
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- with .Values.podAnnotations }}
       annotations:
-        # Roll pods when the ConfigMap changes
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-        {{- end }}
+      {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -41,50 +39,25 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           env:
-            # Three-tier role selector – manager spawns kube_worker and cloudflare_worker
-            - name: ROLE
-              value: "manager"
-            # Switches that control the Ansible operator loop
             - name: WATCH_NAMESPACES
               value: {{ .Values.operator.watchNamespaces | quote }}
-            - name: POLL_INTERVAL_SECONDS
-              value: {{ .Values.operator.pollIntervalSeconds | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.operator.logLevel | quote }}
-            - name: CLOUDFLARE_API_BASE
-              value: {{ .Values.operator.cloudflareApiBase | quote }}
-            # Injected by the Kubernetes downward API – used by the operator to
-            # locate its own ConfigMap and Deployment for self-updates.
             - name: OPERATOR_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # Pod name – used by cloudflare_worker to claim CloudflareTask CRs
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
             {{- with .Values.operator.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: ansible-tmp
-              mountPath: /runner
-            - name: config
-              mountPath: /etc/operator
-              readOnly: true
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: ansible-tmp
-          emptyDir: {}
-        - name: config
-          configMap:
-            name: {{ include "cloudflare-zero-trust-operator.fullname" . }}-config
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

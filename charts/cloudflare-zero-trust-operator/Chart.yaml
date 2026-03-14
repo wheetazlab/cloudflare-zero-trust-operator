@@ -3,10 +3,10 @@ name: cloudflare-zero-trust-operator
 description: >
   A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by
   watching HTTPRoute resources and reconciling them with the Cloudflare API.
-  The operator is packaged as a container running Ansible roles.
+  The operator uses kopf (Python) to watch and reconcile resources.
 type: application
-version: 0.1.45
-appVersion: "0.1.40"
+version: 0.2.0
+appVersion: "0.2.0"
 keywords:
   - cloudflare
   - zero-trust

@@ -8,12 +8,12 @@ metadata:
   labels:
     {{- include "cloudflare-zero-trust-operator.labels" . | nindent 4 }}
 rules:
-  # CRDs owned by this operator
+  # CRDs owned by this operator — kopf needs patch to store handler annotations
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:
       - cloudflarezerotrusttenants
       - cloudflarezerotrusttemplates
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   - apiGroups: ["cfzt.cloudflare.com"]
     resources:
       - cloudflarezerotrusttenants/status

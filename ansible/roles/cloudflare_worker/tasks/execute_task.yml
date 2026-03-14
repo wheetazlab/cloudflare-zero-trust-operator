@@ -120,17 +120,38 @@
 
 # ─── Operation: Access Policy (uses existing or creates new) ─────────────────
 
-- name: Handle Access Policy (existing)
+- name: Link existing reusable policies to Access Application
+  ansible.builtin.uri:
+    url: "{{ cloudflare_api_base }}/accounts/{{ cf_account_id }}/access/apps/{{ access_app_result.app_id }}/policies"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      id: "{{ item }}"
+    status_code: [200, 201, 409]
+    return_content: true
+  loop: "{{ cf_ops.accessApp.existingPolicyIds | default([]) }}"
+  register: link_policy_responses
+  retries: 3
+  delay: 5
+  until: link_policy_responses.status in [200, 201, 409]
+  when:
+    - cf_ops.accessApp.enabled | default(false) | bool
+    - cf_ops.accessApp.existingPolicyIds | default([]) | length > 0
+
+- name: Record existing policy IDs in results
   ansible.builtin.set_fact:
     cf_results: >-
       {{
         cf_results | combine({
-          'accessPolicyIds': cf_ops.accessApp.existingPolicyIds | default('')
+          'accessPolicyIds': cf_ops.accessApp.existingPolicyIds | default([])
         })
       }}
   when:
     - cf_ops.accessApp.enabled | default(false) | bool
-    - cf_ops.accessApp.existingPolicyIds | default('') | length > 0
+    - cf_ops.accessApp.existingPolicyIds | default([]) | length > 0
 
 - name: Create/Update Access Policy (new)
   block:

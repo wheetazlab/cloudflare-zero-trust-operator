@@ -43,7 +43,7 @@
           'cfzt.cloudflare.com/lastReconcile':    now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')
         }
         | combine({'cfzt.cloudflare.com/accessAppId':    ct_result.accessAppId    | default('')} if ct_result.accessAppId    is defined else {})
-        | combine({'cfzt.cloudflare.com/accessPolicyIds': ct_result.accessPolicyIds | default('')} if ct_result.accessPolicyIds is defined else {})
+        | combine({'cfzt.cloudflare.com/accessPolicyIds': ct_result.accessPolicyIds | join(',')} if ct_result.accessPolicyIds is defined else {})
         | combine({'cfzt.cloudflare.com/serviceTokenId':  ct_result.serviceTokenId  | default('')} if ct_result.serviceTokenId  is defined else {})
         | combine({'cfzt.cloudflare.com/serviceTokenSecretName': ct_route_name + '-cfzt-service-token'} if ct_service_token_created | bool else {})
         | combine({'cfzt.cloudflare.com/dnsRecordId':     ct_result.dnsRecordId     | default('')} if ct_result.dnsRecordId    is defined else {})

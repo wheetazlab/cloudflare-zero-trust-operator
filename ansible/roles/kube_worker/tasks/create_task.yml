@@ -371,9 +371,9 @@
               accessApp:
                 enabled: "{{ create_access_app }}"
                 sessionDuration: "{{ session_duration }}"
-                allowGroups: "{{ allow_groups }}"
-                allowEmails: "{{ allow_emails }}"
-                existingPolicyIds: "{{ resolved_policy_ids }}"
+                allowGroups: "{{ allow_groups.split(',') | map('trim') | select | list if allow_groups | length > 0 else [] }}"
+                allowEmails: "{{ allow_emails.split(',') | map('trim') | select | list if allow_emails | length > 0 else [] }}"
+                existingPolicyIds: "{{ resolved_policy_ids.split(',') | map('trim') | select | list if resolved_policy_ids | length > 0 else [] }}"
                 autoRedirectToIdentity: "{{ auto_redirect_to_identity }}"
                 enableBindingCookie: "{{ enable_binding_cookie }}"
                 httpOnlyCookieAttribute: "{{ http_only_cookie_attribute }}"

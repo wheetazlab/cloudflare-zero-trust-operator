@@ -69,7 +69,7 @@
 
 - name: Record tunnel route result
   ansible.builtin.set_fact:
-    cf_results: "{{ cf_results | combine({'tunnelRouteId': cf_tunnel_id}) }}"
+    cf_results: "{{ cf_results | combine({'hostnameRouteId': cf_tunnel_id}) }}"
   when: cf_ops.tunnelRoute.enabled | default(false) | bool
 
 # ─── Operation: CNAME DNS record ─────────────────────────────────────────────

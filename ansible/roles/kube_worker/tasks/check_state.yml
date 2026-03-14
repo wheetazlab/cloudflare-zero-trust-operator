@@ -43,7 +43,12 @@
 
 - name: Determine if reconciliation is needed
   ansible.builtin.set_fact:
-    needs_reconciliation: "{{ state_cm_query.resources | length == 0 or (state_cm_query.resources[0].data.annotation_hash | default('')) != current_annotation_hash }}"
+    needs_reconciliation: >-
+      {{
+        state_cm_query.resources | length == 0
+        or (state_cm_query.resources[0].data.annotation_hash | default('')) != current_annotation_hash
+        or (state_cm_query.resources[0].metadata.annotations['cfzt.cloudflare.com/httproute-uid'] | default('')) != ir_uid
+      }}
     stored_annotation_hash: "{{ (state_cm_query.resources[0].data.annotation_hash | default('')) if state_cm_query.resources | length > 0 else '' }}"
     stored_cf_ids: "{{ (state_cm_query.resources[0].data.cloudflare_ids | default('{}') | from_json) if state_cm_query.resources | length > 0 else {} }}"
 

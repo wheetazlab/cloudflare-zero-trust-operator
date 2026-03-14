@@ -429,9 +429,13 @@
             phase: Pending
             message: "Queued by kube_worker"
             workerPod: ""
-      when: task_apply_result.changed
+      when:
+        - needs_reconciliation | bool or task_apply_result.changed
+        - task_apply_result.result.status.phase | default('') != 'Running'
 
     - name: Display task queued
       ansible.builtin.debug:
         msg: "CloudflareTask {{ task_name }} queued for cloudflare_worker"
-      when: task_apply_result.changed
+      when:
+        - needs_reconciliation | bool or task_apply_result.changed
+        - task_apply_result.result.status.phase | default('') != 'Running'

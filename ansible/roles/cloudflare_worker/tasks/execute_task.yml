@@ -129,10 +129,12 @@
       Content-Type: "application/json"
     body_format: json
     body:
-      id: "{{ item }}"
+      id: "{{ policy_id_item }}"
     status_code: [200, 201, 409]
     return_content: true
   loop: "{{ cf_ops.accessApp.existingPolicyIds | default([]) }}"
+  loop_control:
+    loop_var: policy_id_item
   register: link_policy_responses
   retries: 3
   delay: 5

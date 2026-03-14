@@ -13,6 +13,8 @@
     namespace: "{{ item }}"
   register: httproute_list_specific
   loop: "{{ namespaces | default([]) }}"
+  loop_control:
+    loop_var: ns_item
   when: (namespaces | default([])) | length > 0
 
 - name: Combine HTTPRoute results (specific namespaces)
@@ -31,11 +33,13 @@
 
 - name: Filter HTTPRoutes with cfzt enabled
   ansible.builtin.set_fact:
-    cfzt_httproutes: "{{ cfzt_httproutes + [item] }}"
+    cfzt_httproutes: "{{ cfzt_httproutes + [route_item] }}"
   loop: "{{ all_httproutes }}"
+  loop_control:
+    loop_var: route_item
   when:
-    - item.metadata.annotations is defined
-    - item.metadata.annotations['cfzt.cloudflare.com/enabled'] | default('false') == 'true'
+    - route_item.metadata.annotations is defined
+    - route_item.metadata.annotations['cfzt.cloudflare.com/enabled'] | default('false') == 'true'
 
 - name: Display HTTPRoute count
   ansible.builtin.debug:

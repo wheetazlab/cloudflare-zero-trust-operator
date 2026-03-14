@@ -66,10 +66,12 @@
 
 - name: Filter HTTPRoutes enabled for tenant {{ tenant_name }}
   ansible.builtin.set_fact:
-    tenant_httproutes: "{{ tenant_httproutes + [item] }}"
+    tenant_httproutes: "{{ tenant_httproutes + [route_item] }}"
   loop: "{{ cfzt_httproutes }}"
+  loop_control:
+    loop_var: route_item
   when:
-    - item.metadata.annotations['cfzt.cloudflare.com/tenant'] | default('') == tenant_name
+    - route_item.metadata.annotations['cfzt.cloudflare.com/tenant'] | default('') == tenant_name
 
 - name: Display HTTPRoute count
   ansible.builtin.debug:

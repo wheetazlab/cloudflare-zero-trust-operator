@@ -22,8 +22,10 @@
 
 - name: Add email rules
   ansible.builtin.set_fact:
-    email_rules: "{{ email_rules | default([]) + [{'email': {'email': item}}] }}"
+    email_rules: "{{ email_rules | default([]) + [{'email': {'email': email_item}}] }}"
   loop: "{{ cf_allow_emails | default([]) }}"
+  loop_control:
+    loop_var: email_item
   when: cf_allow_emails is defined and cf_allow_emails | length > 0
 
 - name: Combine include rules

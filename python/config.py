@@ -84,6 +84,21 @@ class ReconcileSettings:
 
 ANNOTATION_PREFIX = "cfzt.cloudflare.com/"
 
+# Annotations written back by the operator as reconcile results. These must be
+# excluded from the change-detection hash so that the operator's own writes
+# do not trigger another reconcile cycle (feedback loop).
+_OPERATOR_WRITTEN_SUFFIXES: frozenset[str] = frozenset({
+    "lastReconcile",
+    "hostnameRouteId",
+    "cnameRecordId",
+    "dnsRecordId",
+    "dnsRecordIp",
+    "accessAppId",
+    "accessPolicyIds",
+    "serviceTokenId",
+    "serviceTokenSecretName",
+})
+
 
 def _bool(val, default: bool = False) -> bool:
     if isinstance(val, bool):
@@ -119,8 +134,11 @@ def compute_annotation_hash(
     Including template specs ensures that a template change invalidates
     the cached hash even when annotations haven't changed.
     """
-    cfzt = {k: v for k, v in (annotations or {}).items()
-            if k.startswith(ANNOTATION_PREFIX)}
+    cfzt = {
+        k: v for k, v in (annotations or {}).items()
+        if k.startswith(ANNOTATION_PREFIX)
+        and k[len(ANNOTATION_PREFIX):] not in _OPERATOR_WRITTEN_SUFFIXES
+    }
     hashable: dict = {"annotations": cfzt}
     if per_route_template_spec:
         hashable["per_route_template"] = per_route_template_spec

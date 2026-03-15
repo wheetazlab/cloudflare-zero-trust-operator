@@ -148,7 +148,10 @@ def reconcile_httproute(
         tz=datetime.timezone.utc
     ).isoformat()
     k8s.update_state(namespace, name, tenant_name, state)
-    result_annotations[f"{ANNOTATION_PREFIX}lastReconcile"] = state["last_reconcile"]
+    # NOTE: lastReconcile is intentionally NOT written to the HTTPRoute
+    # annotations. Writing a timestamp annotation on every reconcile would
+    # cause kopf to fire an UPDATE event, which would re-trigger the handler
+    # in an infinite loop. The timestamp lives in the state ConfigMap only.
     try:
         k8s.patch_httproute_annotations(namespace, name, result_annotations)
     except Exception as exc:

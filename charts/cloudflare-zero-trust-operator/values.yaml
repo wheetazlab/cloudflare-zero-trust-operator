@@ -119,10 +119,17 @@ rbac:
 # ALL fields marked "Required when create=true" MUST be supplied —
 # the chart will fail at render time if any are missing.
 # -------------------------------------------------------------------
-# Set to false to skip deploying the example CloudflareZeroTrustTemplate CRs into the
-# operator namespace. Templates are installed by default as a starter set.
-# They are labelled cfzt.cloudflare.com/example: "true" for easy cleanup:
-#   kubectl delete cfzttemplate -l cfzt.cloudflare.com/example=true
+# Set to true to deploy example CloudflareZeroTrustTemplate, Tenant, and Secret CRs
+# into the operator namespace as a starter set.
+#
+# Once installed (install: true), these resources carry helm.sh/resource-policy: keep,
+# so flipping install: false on a subsequent 'helm upgrade' will NOT delete them.
+# Helm will simply stop managing them — the resources remain in the cluster.
+#
+# To manually remove them after install:
+#   kubectl delete cfzttemplate,cfzttenant,secret \
+#     -l cfzt.cloudflare.com/example=true \
+#     -n <operator-namespace>
 exampleTemplates:
   install: true
 

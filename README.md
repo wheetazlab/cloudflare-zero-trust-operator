@@ -40,8 +40,7 @@ The operator authenticates to the Cloudflare API using a scoped API token — **
 4. Add the following permissions:
 
 | Permission | Resource | Access | When required |
-|---|---|---|
-|---|
+|---|---|---|---|
 | Cloudflare Tunnel | Account → *your account* | Edit | Always — creates/updates/deletes tunnel hostname routes |
 | Access: Apps and Policies | Account → *your account* | Edit | Always — manages Access Applications and Policies |
 | Access: Service Tokens | Account → *your account* | Edit | Always — creates and deletes service tokens |
@@ -52,58 +51,6 @@ The operator authenticates to the Cloudflare API using a scoped API token — **
 
 5. Set **TTL** if desired (recommended: no expiry, or align with your rotation policy)
 6. Click **Continue to summary → Create Token** and copy the token
-
-### Providing the Token to the Operator
-
-**Option A — Inline via Helm values** (Helm creates the Secret for you):
-
-```yaml
-# my-values.yaml
-tenant:
-  create: true
-  instanceName: "prod-tenant"
-  accountId: "abcdef1234567890abcdef1234567890"
-  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  apiToken:  "your-cloudflare-api-token"   # stored in a K8s Secret at install time
-```
-
-**Option B — Pre-existing Secret** (token never passes through Helm):
-
-```bash
-kubectl create secret generic cfzt-api-token \
-  --namespace cloudflare-zero-trust \
-  --from-literal=token="your-cloudflare-api-token"
-```
-
-```yaml
-# my-values.yaml
-tenant:
-  create: true
-  instanceName: "prod-tenant"
-  accountId: "abcdef1234567890abcdef1234567890"
-  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  existingSecret:
-    name: cfzt-api-token
-    key: token
-```
-
-**Option C — Manual `CloudflareZeroTrustTenant` CR** (full control, beyond Helm):
-
-```yaml
-apiVersion: cfzt.cloudflare.com/v1alpha1
-kind: CloudflareZeroTrustTenant
-metadata:
-  name: prod-tenant
-  namespace: cloudflare-zero-trust
-spec:
-  accountId: "abcdef1234567890abcdef1234567890"
-  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  credentialRef:
-    name: cfzt-api-token   # name of an existing K8s Secret
-    key: token
-```
-
-The token is read at reconcile time from the referenced Secret — it is never stored in annotations, logs, or state ConfigMaps.
 
 ## Quick Start
 
@@ -157,6 +104,58 @@ The operator reconciles the annotation and:
 - creates the DNS CNAME record (if `zoneId` is set on the tenant)
 - creates the Cloudflare Access Application and policy
 - stores all Cloudflare resource IDs back as annotations on the HTTPRoute
+
+### Providing the Token to the Operator
+
+**Option A — Inline via Helm values** (Helm creates the Secret for you):
+
+```yaml
+# my-values.yaml
+tenant:
+  create: true
+  instanceName: "prod-tenant"
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  apiToken:  "your-cloudflare-api-token"   # stored in a K8s Secret at install time
+```
+
+**Option B — Pre-existing Secret** (token never passes through Helm):
+
+```bash
+kubectl create secret generic cfzt-api-token \
+  --namespace cloudflare-zero-trust \
+  --from-literal=token="your-cloudflare-api-token"
+```
+
+```yaml
+# my-values.yaml
+tenant:
+  create: true
+  instanceName: "prod-tenant"
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  existingSecret:
+    name: cfzt-api-token
+    key: token
+```
+
+**Option C — Manual `CloudflareZeroTrustTenant` CR** (full control, beyond Helm):
+
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTenant
+metadata:
+  name: prod-tenant
+  namespace: cloudflare-zero-trust
+spec:
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  credentialRef:
+    name: cfzt-api-token   # name of an existing K8s Secret
+    key: token
+```
+
+The token is read at reconcile time from the referenced Secret — it is never stored in annotations, logs, or state ConfigMaps.
 
 ## What It Does
 

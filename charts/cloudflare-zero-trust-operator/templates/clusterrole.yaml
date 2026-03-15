@@ -27,6 +27,9 @@ rules:
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
     verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes/status"]
+    verbs: ["get", "patch", "update"]
   # Core resources
   - apiGroups: [""]
     resources: ["secrets"]

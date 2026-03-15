@@ -101,6 +101,51 @@ def on_httproute_delete(
 
 
 # ---------------------------------------------------------------------------
+# Template change → re-reconcile affected HTTPRoutes
+# ---------------------------------------------------------------------------
+
+@kopf.on.update(
+    "cloudflarezerotrusttemplates",
+    group="cfzt.cloudflare.com",
+    version="v1alpha1",
+)
+def on_template_update(
+    name: str,
+    namespace: str,
+    logger: logging.Logger,
+    **_,
+) -> dict:
+    """When a template changes, re-reconcile all HTTPRoutes that use it."""
+    import k8s_helpers as k8s
+
+    routes = k8s.list_httproutes()
+    matched = 0
+    for route in routes:
+        ann = route.get("metadata", {}).get("annotations", {})
+        rt_name = route["metadata"]["name"]
+        rt_ns = route["metadata"]["namespace"]
+        # Match per-route template or base template (base-<tenant>)
+        tpl_name = ann.get("cfzt.cloudflare.com/template", "")
+        tenant_name = ann.get("cfzt.cloudflare.com/tenant", "")
+        base_tpl_name = f"base-{tenant_name}" if tenant_name else ""
+        if name not in (tpl_name, base_tpl_name):
+            continue
+        logger.info(
+            "Template '%s' changed — re-reconciling %s/%s",
+            name, rt_ns, rt_name,
+        )
+        try:
+            reconciler.reconcile_httproute(rt_name, rt_ns, route, logger)
+            matched += 1
+        except Exception:
+            logger.exception(
+                "Failed to re-reconcile %s/%s after template change",
+                rt_ns, rt_name,
+            )
+    return {"message": f"Re-reconciled {matched} HTTPRoute(s) for template {name}"}
+
+
+# ---------------------------------------------------------------------------
 # Periodic orphan cleanup — per tenant
 # ---------------------------------------------------------------------------
 

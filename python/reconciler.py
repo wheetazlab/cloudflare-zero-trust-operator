@@ -88,7 +88,9 @@ def reconcile_httproute(
     )
 
     # --- Change detection -------------------------------------------------
-    new_hash = compute_annotation_hash(annotations)
+    per_route_spec = per_route_tpl.get("spec", {}) if per_route_tpl else None
+    base_spec = base_tpl.get("spec", {}) if base_tpl else None
+    new_hash = compute_annotation_hash(annotations, per_route_spec, base_spec)
     existing_state = k8s.get_state(namespace, name) or {}
     if existing_state.get("annotation_hash") == new_hash:
         log.info("No annotation change for %s/%s — skipping", namespace, name)

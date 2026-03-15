@@ -109,12 +109,25 @@ def _deep_get(d: dict, *keys, default=None):
     return d
 
 
-def compute_annotation_hash(annotations: dict) -> str:
-    """SHA-256 of all cfzt.cloudflare.com/* annotations (sorted JSON)."""
+def compute_annotation_hash(
+    annotations: dict,
+    per_route_template_spec: dict | None = None,
+    base_template_spec: dict | None = None,
+) -> str:
+    """SHA-256 of cfzt annotations + template specs (sorted JSON).
+
+    Including template specs ensures that a template change invalidates
+    the cached hash even when annotations haven't changed.
+    """
     cfzt = {k: v for k, v in (annotations or {}).items()
             if k.startswith(ANNOTATION_PREFIX)}
+    hashable: dict = {"annotations": cfzt}
+    if per_route_template_spec:
+        hashable["per_route_template"] = per_route_template_spec
+    if base_template_spec:
+        hashable["base_template"] = base_template_spec
     return hashlib.sha256(
-        json.dumps(cfzt, sort_keys=True).encode()
+        json.dumps(hashable, sort_keys=True).encode()
     ).hexdigest()
 
 

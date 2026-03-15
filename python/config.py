@@ -187,8 +187,9 @@ def merge_settings(
                                 default=_deep_get(base, "dnsOnly", "proxied", default=False))),
         ttl=int(_deep_get(tpl, "dnsOnly", "ttl",
                           default=_deep_get(base, "dnsOnly", "ttl", default=120))),
-        static_ip=_deep_get(tpl, "dnsOnly", "staticIp",
-                            default=_deep_get(base, "dnsOnly", "staticIp", default="")),
+        static_ip=ann.get(f"{ANNOTATION_PREFIX}dnsIp",
+                          _deep_get(tpl, "dnsOnly", "staticIp",
+                                    default=_deep_get(base, "dnsOnly", "staticIp", default=""))),
         ingress_service_ref=_deep_get(tpl, "dnsOnly", "ingressServiceRef",
                                       default=_deep_get(base, "dnsOnly", "ingressServiceRef")),
     )

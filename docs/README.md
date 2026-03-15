@@ -1,7 +1,7 @@
 <!-- markdownlint-disable -->
 # Cloudflare Zero Trust Operator
 
-A Kubernetes Operator for managing Cloudflare Zero Trust resources from your cluster using Ansible.
+A Kubernetes Operator for managing Cloudflare Zero Trust resources from your cluster.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ The operator consists of:
    - `CloudflareZeroTrustTenant` - Cloudflare account/zone/tunnel configuration with credentials
    - `CloudflareZeroTrustTemplate` - Reusable configuration templates for tunnel routes and Access applications
    - `CloudflareZeroTrustOperatorConfig` - Operator pod configuration (singleton)
-2. **Controller**: Ansible-based reconciliation loop that watches Kubernetes resources and manages Cloudflare
+2. **Controller**: kopf-based Python reconciliation loop that watches Kubernetes resources and manages Cloudflare
 3. **Template-driven configuration**: HTTPRoutes use minimal annotations to select templates with full configuration
 
 ### Component Overview
@@ -21,15 +21,12 @@ flowchart TB
     subgraph k8s["Kubernetes Cluster"]
         tenant["CloudflareZeroTrust\nTenant CR"]
         httproute["Gateway API HTTPRoute\n(with annotations)"]
-        subgraph operator["Operator Pod (Ansible Runner)"]
-            manager["Manager"]
-            kube_worker["Kube Worker"]
-            cf_worker["Cloudflare Worker"]
+        subgraph operator["Operator Pod (kopf)"]
+            reconciler["Reconciler"]
+            cleanup["Orphan Cleanup Timer"]
         end
-        tenant --> kube_worker
-        httproute --> kube_worker
-        manager --> kube_worker
-        manager --> cf_worker
+        tenant --> reconciler
+        httproute --> reconciler
     end
 
     subgraph cf["Cloudflare Zero Trust Platform"]
@@ -39,7 +36,8 @@ flowchart TB
         service_tokens["Service Tokens"]
     end
 
-    cf_worker -->|"Cloudflare API"| cf
+    reconciler -->|"Cloudflare SDK"| cf
+    cleanup -->|"Cloudflare SDK"| cf
 ```
 
 ### Reconciliation Flow
@@ -483,9 +481,7 @@ Environment variables for the operator:
 ### Prerequisites
 
 - Python 3.9+
-- Ansible 2.14+
 - kubectl configured with cluster access
-- Docker (for container builds)
 
 ### Setup
 
@@ -493,7 +489,6 @@ Environment variables for the operator:
 
 ```bash
 pip install -r container/requirements.txt
-ansible-galaxy collection install -r ansible/requirements.yml
 ```
 
 2. **Set up test environment**:
@@ -505,20 +500,7 @@ export POLL_INTERVAL_SECONDS="30"
 export LOG_LEVEL="DEBUG"
 ```
 
-3. **Run reconciliation locally**:
-
-```bash
-cd ansible
-ansible-playbook playbooks/reconcile.yml -e "poll_interval=30" -e "watch_namespaces=default"
-```
-
 ### Testing
-
-Run Ansible lint:
-
-```bash
-cd ansible && ansible-lint playbooks/ roles/
-```
 
 Build container locally:
 
@@ -577,8 +559,8 @@ The operator is designed to support additional Cloudflare Zero Trust features:
 To add support for new Cloudflare resources:
 
 1. Extend annotation schema in docs
-2. Add API interaction tasks in `ansible/roles/cloudflare_api/tasks/`
-3. Update reconciliation logic in `ansible/roles/tenant_reconcile/tasks/`
+2. Add API interaction functions in `python/cloudflare_api.py`
+3. Update reconciliation logic in `python/reconciler.py`
 4. Add state tracking annotations
 5. Update examples
 

@@ -557,7 +557,7 @@ def delete_service_token(
 
 
 # ---------------------------------------------------------------------------
-# Bulk deletion (mirrors ansible delete_resources.yml)
+# Bulk deletion
 # ---------------------------------------------------------------------------
 
 def delete_all_resources(
@@ -574,7 +574,7 @@ def delete_all_resources(
     """Delete all Cloudflare resources associated with a route.
 
     Silently skips resources with empty IDs.  Order: app → token → tunnel
-    route → DNS record (mirrors Ansible delete_resources.yml).
+    route → DNS record.
     """
     if app_id:
         delete_access_app(client, account_id, app_id)

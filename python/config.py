@@ -1,6 +1,6 @@
 """Settings dataclasses and template-merge logic.
 
-Replicates the Ansible create_task.yml merge chain:
+Merge chain:
     annotation override → per-route template → base template → hardcoded default
 """
 from __future__ import annotations

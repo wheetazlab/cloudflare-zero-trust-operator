@@ -12,7 +12,6 @@ Be respectful, inclusive, and professional in all interactions.
 ### Prerequisites
 
 - Python 3.9+
-- Ansible 2.14+
 - Docker
 - kubectl
 - Access to a Kubernetes cluster (kind, minikube, or cloud-based)
@@ -33,13 +32,7 @@ cd cloudflare-zero-trust-operator
 pip install -r container/requirements.txt
 ```
 
-3. **Install Ansible collections:**
-
-```bash
-ansible-galaxy collection install -r ansible/requirements.yml
-```
-
-4. **Set up test environment:**
+3. **Set up test environment:**
 
 ```bash
 # Create a kind cluster
@@ -56,22 +49,15 @@ export LOG_LEVEL="DEBUG"
 
 ### Running Locally
 
-You can run the operator locally without building a container:
+The operator is a kopf-based Python controller. Run it locally with:
 
 ```bash
-cd ansible
-ansible-playbook playbooks/reconcile.yml \
-  -e "poll_interval=30" \
-  -e "watch_namespaces=default" \
-  -e "log_level=DEBUG"
+python python/main.py
 ```
 
 ### Building and Testing
 
 ```bash
-# Run linting
-cd ansible && ansible-lint playbooks/ roles/
-
 # Build container image
 docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
@@ -107,26 +93,18 @@ kubectl logs -n cloudflare-zero-trust -l app=cloudflare-zero-trust-operator -f
 
 ```
 .
-├── ansible/                    # Ansible playbooks and roles
-│   ├── playbooks/             # Main reconciliation playbook
-│   ├── roles/                 # Ansible roles
-│   │   ├── cloudflare_api/    # Cloudflare API interactions
-│   │   ├── k8s_watch/         # Kubernetes resource watching
-│   │   ├── tenant_reconcile/  # Main reconciliation logic
-│   │   └── reconciliation_loop/ # Continuous reconciliation loop
-│   ├── ansible.cfg            # Ansible configuration
-│   └── requirements.yml       # Ansible collection dependencies
-├── config/                    # Kubernetes manifests
-│   ├── crd/                   # Custom Resource Definitions
-│   ├── rbac/                  # RBAC manifests
-│   └── deployment/            # Operator deployment
+├── python/                    # kopf-based operator source
+│   ├── main.py               # Entry point and kopf handlers
+│   ├── reconciler.py         # Core reconciliation and deletion logic
+│   ├── cloudflare_api.py     # Cloudflare SDK wrapper functions
+│   ├── config.py             # Settings dataclasses and template merge
+│   └── k8s.py                # Kubernetes API helpers
 ├── container/                 # Container build files
 │   ├── Dockerfile             # Container image definition
 │   ├── entrypoint.sh          # Container entrypoint script
 │   └── requirements.txt       # Python dependencies
-├── docs/                      # Documentation
 ├── charts/                    # Helm chart for operator deployment
-├── examples/                  # Example CR configurations
+├── docs/                      # Documentation
 └── .github/workflows/         # CI/CD workflows
 ```
 
@@ -136,45 +114,26 @@ kubectl logs -n cloudflare-zero-trust -l app=cloudflare-zero-trust-operator -f
 
 To add support for a new Cloudflare API:
 
-1. Create a new task file in `ansible/roles/cloudflare_api/tasks/`:
-   ```yaml
-   # manage_new_resource.yml
-   ---
-   - name: Create/Update New Resource
-     ansible.builtin.uri:
-       url: "{{ cf_api_base }}/accounts/{{ cf_account_id }}/path/to/resource"
-       method: POST
-       headers:
-         Authorization: "Bearer {{ cf_api_token }}"
-         Content-Type: "application/json"
-       body_format: json
-       body: "{{ resource_payload }}"
-       status_code: [200, 201]
-       return_content: true
-     register: create_response
-   ```
-
-2. Update the reconciliation logic in `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
-
+1. Add API interaction functions in `python/cloudflare_api.py`
+2. Update reconciliation logic in `python/reconciler.py`
 3. Add new annotations to documentation
-
 4. Add examples
 
 ### Adding New Annotations
 
 1. Document the annotation in `docs/README.md`
-2. Parse the annotation in `ansible/roles/tenant_reconcile/tasks/reconcile_httproute.yml`
-3. Implement the logic
+2. Parse the annotation in `python/config.py`
+3. Implement the logic in `python/reconciler.py`
 4. Add examples
 
 ## Testing
 
 ### Unit Testing
 
-Currently, the project uses ansible-lint for linting:
+Run linting:
 
 ```bash
-cd ansible && ansible-lint playbooks/ roles/
+pylint python/
 ```
 
 ### Integration Testing
@@ -207,7 +166,7 @@ Test against a real Kubernetes cluster:
 ### Before Submitting
 
 - [ ] Code follows project structure and conventions
-- [ ] All tests pass (`cd ansible && ansible-lint playbooks/ roles/`)
+- [ ] All tests pass
 - [ ] Documentation is updated
 - [ ] Examples are added/updated if applicable
 - [ ] Commit messages are clear and descriptive

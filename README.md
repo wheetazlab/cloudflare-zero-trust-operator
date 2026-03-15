@@ -1,7 +1,7 @@
 <!-- markdownlint-disable -->
 # Cloudflare Zero Trust Operator
 
-A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from your cluster using Ansible.
+A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from your cluster.
 
 ## Features
 
@@ -72,8 +72,6 @@ The operator reconciles the annotation and:
 
 - [Helm chart README](charts/cloudflare-zero-trust-operator/README.md) — full install guide, all values, CRD reference, dns-only mode, upgrade/uninstall
 - [docs/README.md](docs/README.md) — high-level documentation index
-- [docs/architecture.md](docs/architecture.md) — component architecture and design
-- [docs/flow.md](docs/flow.md) — reconciliation flow walkthrough
 - [Examples](examples/) — example template and HTTPRoute configurations
 
 ## What It Does
@@ -104,38 +102,9 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 
 ## Architecture
 
-The operator runs as **three coordinated Deployments** in the same namespace, all from the same container image, differentiated by the `ROLE` environment variable:
+The operator runs as a single **kopf**-based Python controller in one Deployment. It watches `HTTPRoute` resources for `cfzt.cloudflare.com/*` annotations and reconciles Cloudflare Zero Trust resources (tunnel routes, DNS CNAMEs, Access applications, Access policies, service tokens) via the Cloudflare Python SDK.
 
-```mermaid
-flowchart TD
-    subgraph cluster["Kubernetes Cluster"]
-        manager["**manager** pod<br/>(syncs OperatorCfg)"]
-        kube["**kube_worker** pod<br/>reads HTTPRoutes<br/>creates Tasks"]
-        tasks[("CloudflareTask CRs<br/>(work queue)")]
-        cfworker["**cloudflare_worker** pod<br/>claims + executes tasks<br/>writes result IDs back"]
-        httproutes["HTTPRoutes<br/>(IDs written back)"]
-        tenants["Tenant CRs + Secrets<br/>(credentials)"]
-    end
-
-    cfapi["☁️ Cloudflare API<br/>(tunnel / DNS / Access)"]
-
-    manager -->|"ensures exist"| kube
-    manager -->|"ensures exist"| cfworker
-    kube -->|"creates"| tasks
-    tasks -->|"claimed by"| cfworker
-    cfworker -->|"calls"| cfapi
-    cfworker -->|"writes result IDs"| httproutes
-    tenants -.->|"credentials"| kube
-    tenants -.->|"credentials"| cfworker
-```
-
-**`kube_worker`** is Kubernetes-only — it reads `HTTPRoute` annotations, detects changes via SHA256 hash, and creates `CloudflareTask` CRs as work items.
-
-**`cloudflare_worker`** is API-only — it claims tasks and makes all Cloudflare REST API calls (tunnel routes, DNS, Access apps, service tokens), writing result IDs back to the task status.
-
-**`manager`** keeps the other two Deployments healthy and applies any `CloudflareZeroTrustOperatorConfig` CR changes to the operator's own Deployment.
-
-See [docs/architecture.md](docs/architecture.md) for the full three-tier design and [docs/flow.md](docs/flow.md) for the reconciliation flow.
+State is tracked in per-HTTPRoute ConfigMaps (`cfzt-{namespace}-{name}`) using a SHA256 hash to detect annotation changes and avoid unnecessary API calls. An orphan cleanup timer detects and removes Cloudflare resources for deleted HTTPRoutes.
 
 ## Development
 
@@ -145,10 +114,6 @@ cd cloudflare-zero-trust-operator
 
 # Install dependencies
 pip install -r container/requirements.txt
-ansible-galaxy collection install -r ansible/requirements.yml
-
-# Build container
-docker build -f container/Dockerfile -t ghcr.io/wheetazlab/cloudflare-zero-trust-operator:latest .
 
 # Deploy via Helm (local chart)
 helm install cloudflare-zero-trust-operator ./charts/cloudflare-zero-trust-operator \

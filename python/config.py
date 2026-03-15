@@ -192,10 +192,14 @@ def merge_settings(
                          default=_deep_get(base, "originService", "originTLS", key,
                                            default=default))
 
+    # Template variable substitution: {{ hostname }} → actual hostname
+    def _subst(val):
+        return val.replace("{{ hostname }}", hostname) if isinstance(val, str) else val
+
     origin_tls = OriginTLS(
         no_tls_verify=_bool(ann.get(f"{ANNOTATION_PREFIX}origin.noTLSVerify",
                                     _tls_val("noTLSVerify", False))),
-        origin_server_name=_tls_val("originServerName", ""),
+        origin_server_name=_subst(_tls_val("originServerName", "")),
         ca_pool=_tls_val("caPool", ""),
         tls_timeout=int(_tls_val("tlsTimeout", 10)),
         http2_origin=_bool(_tls_val("http2Origin", False)),

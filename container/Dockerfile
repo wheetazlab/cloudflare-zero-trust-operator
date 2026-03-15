@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-LABEL org.opencontainers.image.version="0.2.13"
+LABEL org.opencontainers.image.version="0.2.16"
 LABEL org.opencontainers.image.description="kopf-based Kubernetes operator that watches HTTPRoute resources and reconciles them with the Cloudflare API to manage tunnel routing, Access Applications, and service tokens."
 LABEL org.opencontainers.image.source="https://github.com/wheetazlab/cloudflare-zero-trust-operator"
 LABEL org.opencontainers.image.licenses="MIT"

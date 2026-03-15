@@ -484,11 +484,12 @@ def upsert_access_policy(
     Returns ``{"policy_id": ..., "created": bool}``.
     """
     include = _build_include_rules(allow_groups, allow_emails)
-    payload = {
+    # The SDK doesn't expose name/decision/include as named params;
+    # pass them via extra_body so they're merged into the JSON payload.
+    body = {
         "name": policy_name,
         "decision": "allow",
         "include": include,
-        "precedence": 1,
     }
 
     if existing_policy_id:
@@ -496,14 +497,16 @@ def upsert_access_policy(
             policy_id=existing_policy_id,
             app_id=app_id,
             account_id=account_id,
-            **payload,
+            precedence=1,
+            extra_body=body,
         )
         return {"policy_id": existing_policy_id, "created": False}
 
     result = client.zero_trust.access.applications.policies.create(
         app_id=app_id,
         account_id=account_id,
-        **payload,
+        precedence=1,
+        extra_body=body,
     )
     logger.info("Access policy created: %s (%s)", policy_name, result.id)
     return {"policy_id": result.id, "created": True}

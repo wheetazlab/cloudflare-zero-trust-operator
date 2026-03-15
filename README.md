@@ -15,6 +15,12 @@ A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from
 - 🎯 **Multi-tenant** — Support multiple Cloudflare accounts in one cluster
 - 📝 **GitOps-friendly** — Managed entirely through Kubernetes CRs and HTTPRoute annotations
 
+## Documentation
+
+- [Helm chart README](charts/cloudflare-zero-trust-operator/README.md) — full install guide, all values, CRD reference, dns-only mode, upgrade/uninstall
+- [docs/](docs/) — documentation
+- [Examples](examples/) — example template and HTTPRoute configurations
+
 ## Quick Start
 
 ### 1. Add the Helm repository
@@ -67,12 +73,6 @@ The operator reconciles the annotation and:
 - creates the DNS CNAME record (if `zoneId` is set on the tenant)
 - creates the Cloudflare Access Application and policy
 - stores all Cloudflare resource IDs back as annotations on the HTTPRoute
-
-## Documentation
-
-- [Helm chart README](charts/cloudflare-zero-trust-operator/README.md) — full install guide, all values, CRD reference, dns-only mode, upgrade/uninstall
-- [docs/](docs/) — documentation
-- [Examples](examples/) — example template and HTTPRoute configurations
 
 ## What It Does
 

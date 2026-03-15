@@ -363,7 +363,10 @@ def delete_httproute_resources(
 
     tenant_name = state.get("tenant_name", "")
     tenant_ns = state.get("httproute_namespace", namespace)
+    op_ns = k8s.operator_namespace()
     tenant = k8s.get_tenant(tenant_name, tenant_ns) if tenant_name else None
+    if not tenant and tenant_name and tenant_ns != op_ns:
+        tenant = k8s.get_tenant(tenant_name, op_ns)
 
     if not tenant:
         log.warning(

@@ -31,6 +31,8 @@ if [ -n "${WATCH_NAMESPACES}" ]; then
         ns=$(echo "$ns" | xargs)  # trim whitespace
         NAMESPACE_ARGS="${NAMESPACE_ARGS} --namespace=${ns}"
     done
+else
+    NAMESPACE_ARGS="--all-namespaces"
 fi
 
 # Run kopf operator

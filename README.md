@@ -91,14 +91,83 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 - Kubernetes 1.25+
 - Gateway API CRDs installed (`HTTPRoute` must exist)
 - Cloudflare account with Zero Trust enabled
-- Cloudflare API token with the following permissions:
+- A Cloudflare API token (see below)
 
-| Permission | Level | Access | When required |
+## Cloudflare API Token
+
+The operator authenticates to the Cloudflare API using a scoped API token — **not** your Global API Key.
+
+### Creating the Token
+
+1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com)
+2. Go to **My Profile → API Tokens → Create Token**
+3. Click **Create Custom Token**
+4. Add the following permissions:
+
+| Permission | Resource | Access | When required |
 |---|---|---|---|
-| Cloudflare Tunnel | Account | Edit | Always |
-| Access: Apps and Policies | Account | Edit | Always |
-| Access: Service Tokens | Account | Edit | Always |
-| Zone: DNS | Zone | Edit | When `tenant.zoneId` is set (tunnel CNAME + dns-only A records) |
+| Cloudflare Tunnel | Account → *your account* | Edit | Always — creates/updates/deletes tunnel hostname routes |
+| Access: Apps and Policies | Account → *your account* | Edit | Always — manages Access Applications and Policies |
+| Access: Service Tokens | Account → *your account* | Edit | Always — creates and deletes service tokens |
+| Zone: DNS | Zone → *All zones* (or specific zones) | Edit | Always — creates CNAME and A records |
+| Zone: Zone | Zone → *All zones* (or specific zones) | Read | Always — auto-discovers zone ID from each hostname |
+
+> **Zone: Read** is needed for automatic zone discovery (resolving a hostname like `myapp.example.com` to its Cloudflare Zone ID). If you prefer to supply `zoneId` explicitly on every tenant and don't want to grant Zone:Read, you can omit it — but reconciliation will fail on any hostname whose zone is not pre-set.
+
+5. Set **TTL** if desired (recommended: no expiry, or align with your rotation policy)
+6. Click **Continue to summary → Create Token** and copy the token
+
+### Providing the Token to the Operator
+
+**Option A — Inline via Helm values** (Helm creates the Secret for you):
+
+```yaml
+# my-values.yaml
+tenant:
+  create: true
+  instanceName: "prod-tenant"
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  apiToken:  "your-cloudflare-api-token"   # stored in a K8s Secret at install time
+```
+
+**Option B — Pre-existing Secret** (token never passes through Helm):
+
+```bash
+kubectl create secret generic cfzt-api-token \
+  --namespace cloudflare-zero-trust \
+  --from-literal=token="your-cloudflare-api-token"
+```
+
+```yaml
+# my-values.yaml
+tenant:
+  create: true
+  instanceName: "prod-tenant"
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  existingSecret:
+    name: cfzt-api-token
+    key: token
+```
+
+**Option C — Manual `CloudflareZeroTrustTenant` CR** (full control, beyond Helm):
+
+```yaml
+apiVersion: cfzt.cloudflare.com/v1alpha1
+kind: CloudflareZeroTrustTenant
+metadata:
+  name: prod-tenant
+  namespace: cloudflare-zero-trust
+spec:
+  accountId: "abcdef1234567890abcdef1234567890"
+  tunnelId:  "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  credentialRef:
+    name: cfzt-api-token   # name of an existing K8s Secret
+    key: token
+```
+
+The token is read at reconcile time from the referenced Secret — it is never stored in annotations, logs, or state ConfigMaps.
 
 ## Architecture
 

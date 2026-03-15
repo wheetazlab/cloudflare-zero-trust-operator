@@ -194,24 +194,9 @@ def _cleanup_stale_resources(
     account_id = settings.account_id
     zone_id = existing_state.get("zone_id", "")
 
-    # Tunnel → DNS-only: remove stale tunnel ingress rule and CNAME
-    if settings.dns_only.enabled and existing_state.get("cname_record_id"):
-        old_tunnel_id = existing_state.get("tunnel_id", "") or settings.tunnel_id
-        old_hostname = existing_state.get("hostname", "") or settings.hostname
-        log.info(
-            "Template change → dns-only: removing tunnel route + CNAME for %s",
-            old_hostname,
-        )
-        cfapi.delete_tunnel_route(client, account_id, old_tunnel_id, old_hostname)
-        cfapi.delete_dns_record(client, zone_id, existing_state["cname_record_id"])
-
-    # DNS-only → tunnel: remove stale A record
-    if not settings.dns_only.enabled and existing_state.get("dns_record_id"):
-        log.info(
-            "Template change → tunnel: removing A record %s",
-            existing_state["dns_record_id"],
-        )
-        cfapi.delete_dns_record(client, zone_id, existing_state["dns_record_id"])
+    # --- Revoke access controls first (before any DNS/routing changes) ----
+    # Removing auth before changing routing ensures there is never a window
+    # where a route is live but unprotected.
 
     # Access App no longer needed
     if not settings.access.enabled and existing_state.get("access_app_id"):
@@ -233,6 +218,30 @@ def _cleanup_stale_resources(
         svc_secret = existing_state.get("service_token_secret_name", "")
         if svc_secret:
             k8s.delete_secret(namespace, svc_secret)
+
+    # --- DNS / routing changes --------------------------------------------
+    # Cloudflare rejects creating a CNAME when an A record exists for the
+    # same hostname (and vice-versa), so stale records must be removed before
+    # the new-mode sub-reconciler creates the replacement record.
+
+    # Tunnel → DNS-only: remove stale tunnel ingress rule and CNAME
+    if settings.dns_only.enabled and existing_state.get("cname_record_id"):
+        old_tunnel_id = existing_state.get("tunnel_id", "") or settings.tunnel_id
+        old_hostname = existing_state.get("hostname", "") or settings.hostname
+        log.info(
+            "Template change → dns-only: removing tunnel route + CNAME for %s",
+            old_hostname,
+        )
+        cfapi.delete_tunnel_route(client, account_id, old_tunnel_id, old_hostname)
+        cfapi.delete_dns_record(client, zone_id, existing_state["cname_record_id"])
+
+    # DNS-only → tunnel: remove stale A record before CNAME is created
+    if not settings.dns_only.enabled and existing_state.get("dns_record_id"):
+        log.info(
+            "Template change → tunnel: removing A record %s",
+            existing_state["dns_record_id"],
+        )
+        cfapi.delete_dns_record(client, zone_id, existing_state["dns_record_id"])
 
 
 def _reconcile_tunnel(

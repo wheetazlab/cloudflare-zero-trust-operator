@@ -149,7 +149,13 @@ def reconcile_httproute(
     ).isoformat()
     k8s.update_state(namespace, name, tenant_name, state)
     result_annotations[f"{ANNOTATION_PREFIX}lastReconcile"] = state["last_reconcile"]
-    k8s.patch_httproute_annotations(namespace, name, result_annotations)
+    try:
+        k8s.patch_httproute_annotations(namespace, name, result_annotations)
+    except Exception as exc:
+        if "404" in str(exc) or "Not Found" in str(exc):
+            log.info("HTTPRoute %s/%s was deleted mid-reconcile — skipping annotation patch", namespace, name)
+        else:
+            raise
     log.info("Reconciled %s/%s  hostname=%s", namespace, name, hostname)
 
 

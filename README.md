@@ -71,7 +71,7 @@ The operator reconciles the annotation and:
 ## Documentation
 
 - [Helm chart README](charts/cloudflare-zero-trust-operator/README.md) — full install guide, all values, CRD reference, dns-only mode, upgrade/uninstall
-- [docs/README.md](docs/README.md) — high-level documentation index
+- [docs/](docs/) — documentation
 - [Examples](examples/) — example template and HTTPRoute configurations
 
 ## What It Does

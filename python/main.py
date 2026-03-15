@@ -86,10 +86,7 @@ def on_httproute_reconcile(
     return {"message": f"Reconciled {namespace}/{name}"}
 
 
-@kopf.on.delete(
-    **HTTPROUTE_KWARGS,
-    optional=True,  # Don't add a finalizer — we don't own HTTPRoutes
-)
+@kopf.on.delete(**HTTPROUTE_KWARGS)
 def on_httproute_delete(
     name: str,
     namespace: str,

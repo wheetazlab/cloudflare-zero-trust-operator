@@ -54,22 +54,29 @@ def reconcile_httproute(
         )
         return
 
-    # --- Tenant lookup ----------------------------------------------------
+    # --- Tenant lookup (HTTPRoute namespace, then operator namespace) -----
+    op_ns = k8s.operator_namespace()
     tenant = k8s.get_tenant(tenant_name, namespace)
+    if not tenant and namespace != op_ns:
+        tenant = k8s.get_tenant(tenant_name, op_ns)
     if not tenant:
         raise kopf.TemporaryError(
-            f"Tenant '{tenant_name}' not found in namespace '{namespace}'",
+            f"Tenant '{tenant_name}' not found in namespace "
+            f"'{namespace}' or '{op_ns}'",
             delay=30,
         )
 
-    # --- Template lookup --------------------------------------------------
+    # --- Template lookup (HTTPRoute namespace, then operator namespace) ---
     per_route_tpl_name = annotations.get(f"{ANNOTATION_PREFIX}template")
-    per_route_tpl = (
-        k8s.get_template(per_route_tpl_name, namespace)
-        if per_route_tpl_name else None
-    )
+    per_route_tpl = None
+    if per_route_tpl_name:
+        per_route_tpl = k8s.get_template(per_route_tpl_name, namespace)
+        if not per_route_tpl and namespace != op_ns:
+            per_route_tpl = k8s.get_template(per_route_tpl_name, op_ns)
     base_tpl_name = f"base-{tenant_name}"
     base_tpl = k8s.get_template(base_tpl_name, namespace)
+    if not base_tpl and namespace != op_ns:
+        base_tpl = k8s.get_template(base_tpl_name, op_ns)
 
     # --- Merge settings ---------------------------------------------------
     settings = merge_settings(

@@ -118,7 +118,7 @@ def upsert_tunnel_route(
     """
     # Fetch existing config
     try:
-        existing = client.zero_trust.tunnels.configurations.get(
+        existing = client.zero_trust.tunnels.cloudflared.configurations.get(
             tunnel_id=tunnel_id, account_id=account_id,
         )
         ingress = list(existing.config.ingress) if existing.config and existing.config.ingress else []
@@ -163,7 +163,7 @@ def upsert_tunnel_route(
     updated += catch_all
 
     # PUT the full config
-    client.zero_trust.tunnels.configurations.update(
+    client.zero_trust.tunnels.cloudflared.configurations.update(
         tunnel_id=tunnel_id,
         account_id=account_id,
         config={"ingress": updated},
@@ -182,7 +182,7 @@ def delete_tunnel_route(
     if not tunnel_id or not hostname:
         return
     try:
-        existing = client.zero_trust.tunnels.configurations.get(
+        existing = client.zero_trust.tunnels.cloudflared.configurations.get(
             tunnel_id=tunnel_id, account_id=account_id,
         )
         ingress = list(existing.config.ingress) if existing.config and existing.config.ingress else []
@@ -201,7 +201,7 @@ def delete_tunnel_route(
     if not updated:
         updated = [{"service": "http_status:404"}]
 
-    client.zero_trust.tunnels.configurations.update(
+    client.zero_trust.tunnels.cloudflared.configurations.update(
         tunnel_id=tunnel_id,
         account_id=account_id,
         config={"ingress": updated},

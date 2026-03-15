@@ -2,6 +2,31 @@ apiVersion: v1
 entries:
   cloudflare-zero-trust-operator:
   - apiVersion: v2
+    appVersion: 0.2.13
+    created: "2026-03-15T05:30:26.041332955Z"
+    description: 'A Kubernetes operator that manages Cloudflare Zero Trust tunnel
+      routing by watching HTTPRoute resources and reconciling them with the Cloudflare
+      API. The operator uses kopf (Python) to watch and reconcile resources. '
+    digest: 3cbb257f7617c6800f420250a3706738da1e22cb0014fc029720ba09d44ac915
+    home: https://github.com/wheetazlab/cloudflare-zero-trust-operator
+    keywords:
+    - cloudflare
+    - zero-trust
+    - tunnel
+    - operator
+    - gateway-api
+    - httproute
+    maintainers:
+    - name: wheetazlab
+      url: https://github.com/wheetazlab
+    name: cloudflare-zero-trust-operator
+    sources:
+    - https://github.com/wheetazlab/cloudflare-zero-trust-operator
+    type: application
+    urls:
+    - https://github.com/wheetazlab/cloudflare-zero-trust-operator/releases/download/cloudflare-zero-trust-operator-0.2.13/cloudflare-zero-trust-operator-0.2.13.tgz
+    version: 0.2.13
+  - apiVersion: v2
     appVersion: 0.2.12
     created: "2026-03-15T05:10:03.239469374Z"
     description: 'A Kubernetes operator that manages Cloudflare Zero Trust tunnel
@@ -1476,4 +1501,4 @@ entries:
     urls:
     - https://github.com/wheetazlab/cloudflare-zero-trust-operator/releases/download/cloudflare-zero-trust-operator-0.1.0/cloudflare-zero-trust-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-03-15T05:10:03.239736783Z"
+generated: "2026-03-15T05:30:26.041540111Z"

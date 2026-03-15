@@ -258,14 +258,14 @@ The operator is deployed via a Helm chart located at `charts/cloudflare-zero-tru
 graph TB
     subgraph "Helm Chart Resources"
         NS["Namespace"]
-        CRD_T["CRD\nCloudflareZeroTrustTenant"]
-        CRD_TPL["CRD\nCloudflareZeroTrustTemplate"]
+        CRD_T["CRD<br/>CloudflareZeroTrustTenant"]
+        CRD_TPL["CRD<br/>CloudflareZeroTrustTemplate"]
         CR["ClusterRole"]
         CRB["ClusterRoleBinding"]
         SA["ServiceAccount"]
-        DEP["Deployment\n(1 replica)"]
-        EX_TPL["Example Templates\n(optional)"]
-        TENANT["Tenant CR + Secret\n(optional)"]
+        DEP["Deployment<br/>(1 replica)"]
+        EX_TPL["Example Templates<br/>(optional)"]
+        TENANT["Tenant CR + Secret<br/>(optional)"]
     end
 
     NS --> SA

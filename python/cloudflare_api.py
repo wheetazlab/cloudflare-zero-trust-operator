@@ -140,14 +140,13 @@ def upsert_tunnel_route(
         origin_request: dict[str, Any] = {
             "httpHostHeader": hostname,
             "noTLSVerify": no_tls_verify,
-            "tcpKeepAlive": "30s",
             "keepAliveConnections": 100,
         }
         if origin_server_name:
             origin_request["originServerName"] = origin_server_name
         if ca_pool:
             origin_request["caPool"] = ca_pool
-        origin_request["tlsTimeout"] = f"{tls_timeout}s"
+        origin_request["tlsTimeout"] = tls_timeout
         origin_request["http2Origin"] = http2_origin
         rule["originRequest"] = origin_request
 

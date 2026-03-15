@@ -342,7 +342,14 @@ spec:
     enabled: false
 ```
 
-If `exampleTemplates.install: true` (the default), the chart deploys a full starter set. Copy and rename `base-mytenant` to get started quickly.
+If `exampleTemplates.install: true` (the default), the chart deploys a full starter set of `CloudflareZeroTrustTemplate`, `CloudflareZeroTrustTenant`, and `Secret` CRs. Copy and rename `base-mytenant` to get started quickly.
+
+> **Note:** Example resources carry the `helm.sh/resource-policy: keep` annotation. Setting `exampleTemplates.install: false` on a subsequent `helm upgrade` will **not** delete them — Helm stops managing them but leaves them in the cluster. To fully remove them:
+> ```bash
+> kubectl delete cfzttemplate,cfzttenant,secret \
+>   -l cfzt.cloudflare.com/example=true \
+>   -n <operator-namespace>
+> ```
 
 ### 3. Annotate HTTPRoutes
 
@@ -450,7 +457,7 @@ All of these are ignored when `tenant.create=false` (the default).
 | `tenant.apiToken` | `""` | **yes\*** | Inline API token — Helm creates a `<instanceName>-api-token` Secret |
 | `tenant.existingSecret.name` | `""` | **yes\*** | Name of a pre-existing Secret containing the token |
 | `tenant.existingSecret.key` | `"token"` | no | Key inside the existing Secret |
-| `exampleTemplates.install` | `true` | no | Deploy the starter `CloudflareZeroTrustTemplate` CRs (opt-out with `false`) |
+| `exampleTemplates.install` | `true` | no | Deploy the starter `CloudflareZeroTrustTemplate`, `Tenant`, and `Secret` CRs. Resources carry `helm.sh/resource-policy: keep` — setting `false` on upgrade will not delete them; use `kubectl delete` with `-l cfzt.cloudflare.com/example=true` to remove them manually. |
 
 \* Exactly one of `tenant.apiToken` or `tenant.existingSecret.name` must be provided.
 

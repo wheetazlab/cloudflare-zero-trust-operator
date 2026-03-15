@@ -21,6 +21,13 @@ A Kubernetes Operator for managing Cloudflare Zero Trust resources directly from
 - [docs/](docs/) — documentation
 - [Examples](examples/) — example template and HTTPRoute configurations
 
+## Requirements
+
+- Kubernetes 1.25+
+- Gateway API CRDs installed (`HTTPRoute` must exist)
+- Cloudflare account with Zero Trust enabled
+- A Cloudflare API token (see below)
+
 ## Quick Start
 
 ### 1. Add the Helm repository
@@ -85,13 +92,6 @@ The operator watches `HTTPRoute` resources for annotations and automatically man
 5. **Service Tokens** — creates tokens for machine-to-machine authentication
 6. **DNS-only A records** — for internal services reachable via DNS but not tunnelled (see [DNS-only mode](charts/cloudflare-zero-trust-operator/README.md#dns-only-mode-internal--direct-to-cluster-routing))
 7. **State tracking** — uses per-HTTPRoute ConfigMaps (`cfzt-{namespace}-{name}`) to detect annotation changes via SHA256 hash (avoiding unnecessary API calls), and writes result Cloudflare resource IDs back to HTTPRoute annotations for idempotent updates and clean deletion
-
-## Requirements
-
-- Kubernetes 1.25+
-- Gateway API CRDs installed (`HTTPRoute` must exist)
-- Cloudflare account with Zero Trust enabled
-- A Cloudflare API token (see below)
 
 ## Cloudflare API Token
 

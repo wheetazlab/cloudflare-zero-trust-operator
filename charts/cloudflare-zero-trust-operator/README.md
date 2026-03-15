@@ -148,7 +148,11 @@ tenant:
   #   key: "token"
 
 exampleTemplates:
-  install: true   # set false to skip deploying the starter CloudflareZeroTrustTemplate CRs
+  install: true   # set false to skip deploying starter Template/Tenant/Secret CRs
+                  # Note: once installed, resources carry helm.sh/resource-policy: keep
+                  # and will NOT be deleted by 'helm upgrade' with install: false.
+                  # Remove manually: kubectl delete cfzttemplate,cfzttenant,secret \
+                  #   -l cfzt.cloudflare.com/example=true -n <operator-namespace>
 ```
 
 > **Tip:** Origin URL, TLS settings, and Access defaults are configured in a `CloudflareZeroTrustTemplate` named `base-<tenant-instanceName>` rather than on the tenant CR itself. After installing the operator, create a base template named `base-<your-instanceName>` to set the origin service URL and TLS settings that should apply to all routes. See [examples-templates.md](../../docs/examples-templates.md).

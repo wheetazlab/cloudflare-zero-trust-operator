@@ -47,6 +47,8 @@ def configure(settings: kopf.OperatorSettings, **_) -> None:
     )
     # Suppress noisy k8s event posting for routine handler runs
     settings.posting.level = logging.WARNING
+    # Faster retries on transient errors (default max is 60s)
+    settings.networking.error_backoffs = [1, 5, 15]
     logger.info("Cloudflare Zero-Trust operator started")
     if WATCH_NAMESPACES:
         logger.info("Watching namespaces: %s", WATCH_NAMESPACES)
@@ -64,6 +66,7 @@ HTTPROUTE_KWARGS = dict(
     plural="httproutes",
     annotations={"cfzt.cloudflare.com/enabled": "true"},
     when=_ns_filter,
+    backoff=15,  # max 15s retry on handler failure (default 60s)
 )
 
 

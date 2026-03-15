@@ -142,8 +142,8 @@ def upsert_tunnel_route(
             "noTLSVerify": no_tls_verify,
             "keepAliveConnections": 100,
         }
-        if origin_server_name:
-            origin_request["originServerName"] = origin_server_name
+        # Default originServerName to hostname when using HTTPS
+        origin_request["originServerName"] = origin_server_name or hostname
         if ca_pool:
             origin_request["caPool"] = ca_pool
         origin_request["tlsTimeout"] = tls_timeout

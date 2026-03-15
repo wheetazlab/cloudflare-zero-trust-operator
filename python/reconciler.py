@@ -125,6 +125,13 @@ def reconcile_httproute(
     }
     result_annotations: dict[str, str] = {}
 
+    # --- Stale resource cleanup (template change) -------------------------
+    # If the annotation hash changed, the template or settings may have
+    # changed type (e.g. tunnel → dns-only, or access removed).  Delete any
+    # CF resources tracked in the previous state that are no longer required
+    # by the new settings — before creating any new resources.
+    _cleanup_stale_resources(client, settings, existing_state, namespace, log)
+
     # --- DNS-only vs tunnel mode ------------------------------------------
     if settings.dns_only.enabled:
         _reconcile_dns_only(client, settings, zone_id, existing_state,
@@ -165,6 +172,68 @@ def reconcile_httproute(
 # ---------------------------------------------------------------------------
 # Sub-reconcilers
 # ---------------------------------------------------------------------------
+
+def _cleanup_stale_resources(
+    client,
+    settings: ReconcileSettings,
+    existing_state: dict,
+    namespace: str,
+    log: logging.Logger,
+) -> None:
+    """Delete CF resources from a previous reconcile that are no longer
+    needed under the current settings after a template or annotation change.
+
+    Handles these transitions gracefully:
+    - tunnel → dns-only : remove tunnel ingress rule + CNAME record
+    - dns-only → tunnel : remove A record
+    - access removed    : delete Access Application (+ policies cascade in CF)
+    - service token removed : delete Service Token + K8s Secret
+
+    All CF delete calls are idempotent (404 is silently ignored).
+    """
+    account_id = settings.account_id
+    zone_id = existing_state.get("zone_id", "")
+
+    # Tunnel → DNS-only: remove stale tunnel ingress rule and CNAME
+    if settings.dns_only.enabled and existing_state.get("cname_record_id"):
+        old_tunnel_id = existing_state.get("tunnel_id", "") or settings.tunnel_id
+        old_hostname = existing_state.get("hostname", "") or settings.hostname
+        log.info(
+            "Template change → dns-only: removing tunnel route + CNAME for %s",
+            old_hostname,
+        )
+        cfapi.delete_tunnel_route(client, account_id, old_tunnel_id, old_hostname)
+        cfapi.delete_dns_record(client, zone_id, existing_state["cname_record_id"])
+
+    # DNS-only → tunnel: remove stale A record
+    if not settings.dns_only.enabled and existing_state.get("dns_record_id"):
+        log.info(
+            "Template change → tunnel: removing A record %s",
+            existing_state["dns_record_id"],
+        )
+        cfapi.delete_dns_record(client, zone_id, existing_state["dns_record_id"])
+
+    # Access App no longer needed
+    if not settings.access.enabled and existing_state.get("access_app_id"):
+        log.info(
+            "Template change: removing Access App %s",
+            existing_state["access_app_id"],
+        )
+        cfapi.delete_access_app(client, account_id, existing_state["access_app_id"])
+
+    # Service Token no longer needed
+    if not settings.service_token.enabled and existing_state.get("service_token_id"):
+        log.info(
+            "Template change: removing Service Token %s",
+            existing_state["service_token_id"],
+        )
+        cfapi.delete_service_token(
+            client, account_id, existing_state["service_token_id"]
+        )
+        svc_secret = existing_state.get("service_token_secret_name", "")
+        if svc_secret:
+            k8s.delete_secret(namespace, svc_secret)
+
 
 def _reconcile_tunnel(
     client,

@@ -5,8 +5,8 @@ description: >
   watching HTTPRoute resources and reconciling them with the Cloudflare API.
   The operator uses kopf (Python) to watch and reconcile resources.
 type: application
-version: 0.2.16
-appVersion: "0.2.16"
+version: 0.2.17
+appVersion: "0.2.17"
 keywords:
   - cloudflare
   - zero-trust

@@ -637,11 +637,8 @@ flowchart TD
     CHECK -->|"API error (non-404)"| WARN["Log warning, skip"]
     
     ORPHAN --> DELETE["delete_httproute_resources()"]
-    Note over DELETE: Same delete flow —<br/>CF cleanup + state removal
-    
-    ACTIVE --> LOOP
-    DELETE --> LOOP
-    WARN --> LOOP
+    DELETE --> CLEANUP["CF cleanup + state removal<br/>(same as normal delete flow)"]
+    CLEANUP --> LOOP
 ```
 
 ### When Orphans Occur

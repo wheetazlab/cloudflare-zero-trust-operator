@@ -1,7 +1,9 @@
 """kopf operator — event handlers and entry point.
 
-Watches HTTPRoutes annotated with ``cfzt.cloudflare.com/enabled: "true"``
-and reconciles them against the Cloudflare API.  Periodic orphan cleanup
+Watches HTTPRoutes annotated with ``cfzt.cloudflare.com/tenant`` and
+reconciles them against the Cloudflare API: routes with
+``cfzt.cloudflare.com/enabled: "true"`` are published, any other value tears
+their Cloudflare resources down.  Periodic orphan cleanup
 runs via a timer on each CloudflareZeroTrustTenant resource.
 """
 from __future__ import annotations
@@ -60,11 +62,19 @@ def configure(settings: kopf.OperatorSettings, **_) -> None:
 # HTTPRoute handlers
 # ---------------------------------------------------------------------------
 
+ENABLED_ANNOTATION = "cfzt.cloudflare.com/enabled"
+
+# Match on the tenant annotation, not on enabled == "true". If the filter were
+# on enabled, a route switched to "false" would drop out of kopf's view: no
+# handler would run, kopf's diffbase would keep enabled == "true", and
+# switching it back to "true" would look like no change, so nothing would be
+# recreated. Watching all tenant routes keeps the diffbase accurate and lets
+# the handler tear down immediately on disable.
 HTTPROUTE_KWARGS = dict(
     group="gateway.networking.k8s.io",
     version="v1",
     plural="httproutes",
-    annotations={"cfzt.cloudflare.com/enabled": "true"},
+    annotations={"cfzt.cloudflare.com/tenant": kopf.PRESENT},
     when=_ns_filter,
     backoff=15,  # max 15s retry on handler failure (default 60s)
 )
@@ -81,7 +91,11 @@ def on_httproute_reconcile(
     logger: logging.Logger,
     **_,
 ) -> dict:
-    """Reconcile an HTTPRoute against Cloudflare."""
+    """Reconcile an HTTPRoute against Cloudflare, or tear down if disabled."""
+    annotations = meta.get("annotations") or {}
+    if annotations.get(ENABLED_ANNOTATION) != "true":
+        reconciler.disable_httproute(name, namespace, annotations, logger)
+        return {"message": f"Disabled {namespace}/{name}"}
     reconciler.reconcile_httproute(name, namespace, body, logger)
     return {"message": f"Reconciled {namespace}/{name}"}
 

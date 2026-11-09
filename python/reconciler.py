@@ -10,6 +10,9 @@ import ipaddress
 import logging
 
 import kopf # pyright: ignore[reportMissingImports]
+from kubernetes.client.rest import (  # pyright: ignore[reportMissingImports]
+    ApiException as K8sApiException,
+)
 
 from config import (
     ANNOTATION_PREFIX,
@@ -498,6 +501,55 @@ def delete_httproute_resources(
     log.info("Deleted resources for %s/%s", namespace, name)
 
 
+# Annotations the operator writes back onto an HTTPRoute after reconciling.
+# User-set annotations (tenant, hostname, template, ...) are not listed.
+STATUS_ANNOTATIONS = (
+    "accessAppId",
+    "accessPolicyIds",
+    "cnameRecordId",
+    "dnsRecordId",
+    "dnsRecordIp",
+    "hostnameRouteId",
+    "serviceTokenId",
+    "serviceTokenSecretName",
+)
+
+
+def disable_httproute(
+    name: str,
+    namespace: str,
+    annotations: dict[str, str],
+    log: logging.Logger | None = None,
+) -> None:
+    """Tear down Cloudflare resources for an HTTPRoute that is not enabled.
+
+    Called from the reconcile handler when ``cfzt.cloudflare.com/enabled`` is
+    anything other than ``"true"``. Deletes the tracked Cloudflare resources
+    and state ConfigMap (if any) and clears the status annotations, so that
+    re-enabling the route later runs a full reconcile from scratch.
+    """
+    log = log or logger
+    if k8s.get_state(namespace, name):
+        log.info("HTTPRoute %s/%s disabled — removing Cloudflare resources",
+                 namespace, name)
+        delete_httproute_resources(name, namespace, log)
+
+    stale = {
+        f"{ANNOTATION_PREFIX}{key}": None
+        for key in STATUS_ANNOTATIONS
+        if f"{ANNOTATION_PREFIX}{key}" in annotations
+    }
+    if not stale:
+        return
+    try:
+        k8s.patch_httproute_annotations(namespace, name, stale)
+    except K8sApiException as exc:
+        if exc.status != 404:
+            raise
+        log.info("HTTPRoute %s/%s was deleted during disable — skipping "
+                 "annotation cleanup", namespace, name)
+
+
 # ---------------------------------------------------------------------------
 # Orphan cleanup
 # ---------------------------------------------------------------------------
@@ -527,7 +579,6 @@ def cleanup_orphaned_states(
 
         # Check if the HTTPRoute still exists and is still enabled
         from kubernetes import client as k8s_client # pyright: ignore[reportMissingImports]
-        from kubernetes.client.rest import ApiException as K8sApiException # pyright: ignore[reportMissingImports]
         crd_api = k8s_client.CustomObjectsApi()
         try:
             route = crd_api.get_namespaced_custom_object(

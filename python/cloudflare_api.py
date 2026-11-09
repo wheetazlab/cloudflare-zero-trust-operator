@@ -9,6 +9,7 @@ policies (app-level and reusable), service tokens, and resource deletion.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import cloudflare as cf_errors # type: ignore
@@ -97,6 +98,22 @@ def resolve_policy_ids(
 # Tunnel hostname route management
 # ---------------------------------------------------------------------------
 
+# Tunnel ingress is one config object per tunnel, updated by read-modify-write
+# (GET the full ingress list, change one hostname, PUT it all back). kopf runs
+# sync handlers in a thread pool, so concurrent reconciles for routes on the
+# same tunnel (e.g. on.resume after a restart) would otherwise each PUT a list
+# built from the same stale read, and only the last writer's hostname would
+# survive. Serialise the GET+PUT per tunnel ID.
+_tunnel_locks: dict[str, threading.Lock] = {}
+_tunnel_locks_guard = threading.Lock()
+
+
+def _tunnel_lock(tunnel_id: str) -> threading.Lock:
+    """Return the lock that serialises ingress updates for *tunnel_id*."""
+    with _tunnel_locks_guard:
+        return _tunnel_locks.setdefault(tunnel_id, threading.Lock())
+
+
 def upsert_tunnel_route(
     client: Cloudflare,
     account_id: str,
@@ -116,58 +133,60 @@ def upsert_tunnel_route(
 
     Returns the tunnel ID (used as the hostnameRouteId).
     """
-    # Fetch existing config
-    try:
-        existing = client.zero_trust.tunnels.cloudflared.configurations.get(
-            tunnel_id=tunnel_id, account_id=account_id,
+    with _tunnel_lock(tunnel_id):
+        # Fetch existing config
+        try:
+            existing = client.zero_trust.tunnels.cloudflared.configurations.get(
+                tunnel_id=tunnel_id, account_id=account_id,
+            )
+            ingress = (list(existing.config.ingress)
+                       if existing.config and existing.config.ingress else [])
+        except cf_errors.NotFoundError:
+            ingress = []
+
+        # Normalise: ensure ingress is a list of dicts
+        ingress_dicts = []
+        for rule in ingress:
+            if isinstance(rule, dict):
+                ingress_dicts.append(rule)
+            else:
+                ingress_dicts.append(rule.model_dump() if hasattr(rule, "model_dump") else dict(rule))
+
+        # Build the new hostname rule
+        rule: dict[str, Any] = {"hostname": hostname, "service": origin_service}
+
+        if origin_uses_https:
+            origin_request: dict[str, Any] = {
+                "httpHostHeader": hostname,
+                "noTLSVerify": no_tls_verify,
+                "keepAliveConnections": 100,
+            }
+            # Default originServerName to hostname when using HTTPS
+            origin_request["originServerName"] = origin_server_name or hostname
+            if ca_pool:
+                origin_request["caPool"] = ca_pool
+            origin_request["tlsTimeout"] = tls_timeout
+            origin_request["http2Origin"] = http2_origin
+            rule["originRequest"] = origin_request
+
+        # Remove existing rule for this hostname, preserve catch-all separately
+        filtered = [r for r in ingress_dicts
+                    if r.get("hostname") and r["hostname"] != hostname]
+        catch_all = [r for r in ingress_dicts if not r.get("hostname")]
+
+        updated = [rule] + filtered
+        # Ensure exactly one catch-all at the end
+        if not any("http_status" in str(r.get("service", "")) for r in catch_all):
+            catch_all = [{"service": "http_status:404"}]
+        updated += catch_all
+
+        # PUT the full config
+        client.zero_trust.tunnels.cloudflared.configurations.update(
+            tunnel_id=tunnel_id,
+            account_id=account_id,
+            config={"ingress": updated},
         )
-        ingress = list(existing.config.ingress) if existing.config and existing.config.ingress else []
-    except cf_errors.NotFoundError:
-        ingress = []
-
-    # Normalise: ensure ingress is a list of dicts
-    ingress_dicts = []
-    for rule in ingress:
-        if isinstance(rule, dict):
-            ingress_dicts.append(rule)
-        else:
-            ingress_dicts.append(rule.model_dump() if hasattr(rule, "model_dump") else dict(rule))
-
-    # Build the new hostname rule
-    rule: dict[str, Any] = {"hostname": hostname, "service": origin_service}
-
-    if origin_uses_https:
-        origin_request: dict[str, Any] = {
-            "httpHostHeader": hostname,
-            "noTLSVerify": no_tls_verify,
-            "keepAliveConnections": 100,
-        }
-        # Default originServerName to hostname when using HTTPS
-        origin_request["originServerName"] = origin_server_name or hostname
-        if ca_pool:
-            origin_request["caPool"] = ca_pool
-        origin_request["tlsTimeout"] = tls_timeout
-        origin_request["http2Origin"] = http2_origin
-        rule["originRequest"] = origin_request
-
-    # Remove existing rule for this hostname, preserve catch-all separately
-    filtered = [r for r in ingress_dicts
-                if r.get("hostname") and r["hostname"] != hostname]
-    catch_all = [r for r in ingress_dicts if not r.get("hostname")]
-
-    updated = [rule] + filtered
-    # Ensure exactly one catch-all at the end
-    if not any("http_status" in str(r.get("service", "")) for r in catch_all):
-        catch_all = [{"service": "http_status:404"}]
-    updated += catch_all
-
-    # PUT the full config
-    client.zero_trust.tunnels.cloudflared.configurations.update(
-        tunnel_id=tunnel_id,
-        account_id=account_id,
-        config={"ingress": updated},
-    )
-    logger.info("Tunnel route upserted: %s → %s", hostname, origin_service)
+        logger.info("Tunnel route upserted: %s → %s", hostname, origin_service)
     return tunnel_id
 
 
@@ -180,32 +199,34 @@ def delete_tunnel_route(
     """Remove a hostname from the tunnel ingress config."""
     if not tunnel_id or not hostname:
         return
-    try:
-        existing = client.zero_trust.tunnels.cloudflared.configurations.get(
-            tunnel_id=tunnel_id, account_id=account_id,
+    with _tunnel_lock(tunnel_id):
+        try:
+            existing = client.zero_trust.tunnels.cloudflared.configurations.get(
+                tunnel_id=tunnel_id, account_id=account_id,
+            )
+            ingress = (list(existing.config.ingress)
+                       if existing.config and existing.config.ingress else [])
+        except cf_errors.NotFoundError:
+            return
+
+        ingress_dicts = []
+        for rule in ingress:
+            if isinstance(rule, dict):
+                ingress_dicts.append(rule)
+            else:
+                ingress_dicts.append(rule.model_dump() if hasattr(rule, "model_dump") else dict(rule))
+
+        updated = [r for r in ingress_dicts
+                   if r.get("hostname") != hostname]
+        if not updated:
+            updated = [{"service": "http_status:404"}]
+
+        client.zero_trust.tunnels.cloudflared.configurations.update(
+            tunnel_id=tunnel_id,
+            account_id=account_id,
+            config={"ingress": updated},
         )
-        ingress = list(existing.config.ingress) if existing.config and existing.config.ingress else []
-    except cf_errors.NotFoundError:
-        return
-
-    ingress_dicts = []
-    for rule in ingress:
-        if isinstance(rule, dict):
-            ingress_dicts.append(rule)
-        else:
-            ingress_dicts.append(rule.model_dump() if hasattr(rule, "model_dump") else dict(rule))
-
-    updated = [r for r in ingress_dicts
-               if r.get("hostname") != hostname]
-    if not updated:
-        updated = [{"service": "http_status:404"}]
-
-    client.zero_trust.tunnels.cloudflared.configurations.update(
-        tunnel_id=tunnel_id,
-        account_id=account_id,
-        config={"ingress": updated},
-    )
-    logger.info("Tunnel route removed: %s", hostname)
+        logger.info("Tunnel route removed: %s", hostname)
 
 
 # ---------------------------------------------------------------------------

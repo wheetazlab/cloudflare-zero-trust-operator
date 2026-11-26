@@ -154,6 +154,8 @@ HTTPRoute annotations can override any field from the merged template for that s
 | `cfzt.cloudflare.com/access.enabled` | Override Access Application enabled flag |
 | `cfzt.cloudflare.com/access.existingPolicyNames` | Comma-separated policy names |
 | `cfzt.cloudflare.com/access.sessionDuration` | Override session duration |
+| `cfzt.cloudflare.com/access.appType` | `self_hosted` (default), `ssh` or `vnc`: ssh and vnc are browser-rendered, and the derived origin becomes `ssh://` or `tcp://` |
+| `cfzt.cloudflare.com/access.shortLivedCertificate` | `ssh` apps: create an SSH CA so Cloudflare signs a short-lived certificate for the signed-in user; its public key lands in ConfigMap `cfzt-sshca-<route>` (key `ca.pub`) |
 | `cfzt.cloudflare.com/access.autoRedirectToIdentity` | Override auto-redirect to IdP |
 | `cfzt.cloudflare.com/access.appLauncherVisible` | Override App Launcher visibility |
 | `cfzt.cloudflare.com/access.serviceAuth401Redirect` | Return 401 instead of browser redirect |
@@ -172,6 +174,7 @@ These annotations are set by the operator to track created resources:
 - `cfzt.cloudflare.com/accessPolicyIds`: Comma-separated Access Policy IDs
 - `cfzt.cloudflare.com/serviceTokenId`: Service Token ID
 - `cfzt.cloudflare.com/serviceTokenSecretName`: K8s Secret name containing token credentials
+- `cfzt.cloudflare.com/sshCaConfigMap`: ConfigMap holding the SSH CA public key (`ca.pub`), for `ssh` apps with short-lived certificates
 
 ## CloudflareZeroTrustTemplate CRD
 

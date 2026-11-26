@@ -16,6 +16,8 @@ HTTPRoutes are annotated to tell the operator which tenant, template, and hostna
 | `cfzt.cloudflare.com/access.enabled` | Override Access Application enabled flag |
 | `cfzt.cloudflare.com/access.existingPolicyNames` | Comma-separated policy names |
 | `cfzt.cloudflare.com/access.sessionDuration` | Override session duration |
+| `cfzt.cloudflare.com/access.appType` | `self_hosted` (default), `ssh` or `vnc`: ssh and vnc are browser-rendered, and the derived origin becomes `ssh://` or `tcp://` |
+| `cfzt.cloudflare.com/access.shortLivedCertificate` | `ssh` apps: create an SSH CA so Cloudflare signs a short-lived certificate for the signed-in user; its public key lands in ConfigMap `cfzt-sshca-<route>` (key `ca.pub`) |
 | `cfzt.cloudflare.com/access.autoRedirectToIdentity` | Override auto-redirect |
 | `cfzt.cloudflare.com/access.appLauncherVisible` | Override App Launcher visibility |
 | `cfzt.cloudflare.com/access.serviceAuth401Redirect` | Override 401 redirect behaviour |
@@ -182,3 +184,44 @@ spec:
         - name: nas
           port: 443
 ```
+
+---
+
+## Example 6: Browser-rendered SSH with short-lived certificates
+
+Publishes an SSH server as a terminal in the browser. Cloudflare Access signs the user in, then signs a short-lived SSH certificate for them, so the server needs no password or key. The HTTPRoute only describes the hostname and the Service: it has no `parentRefs`, so no gateway serves it; the operator derives `ssh://wheetutil-ssh.vms.svc.cluster.local:22` from the backendRef. For `ssh` and `vnc` apps an `http(s)` origin from a template (for example a base template pointing at a shared ingress) is ignored in favour of the backendRef; an `origin.url` annotation still overrides both.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wheetutil-ssh
+  namespace: vms
+  annotations:
+    cfzt.cloudflare.com/enabled: "true"
+    cfzt.cloudflare.com/tenant: "prod"
+    cfzt.cloudflare.com/template: "protected-adauth"
+    cfzt.cloudflare.com/hostname: "ssh.example.com"
+    cfzt.cloudflare.com/access.appType: "ssh"
+    cfzt.cloudflare.com/access.shortLivedCertificate: "true"
+spec:
+  hostnames:
+    - "ssh.example.com"
+  rules:
+    - backendRefs:
+        - name: wheetutil-ssh
+          port: 22
+```
+
+The operator writes the CA's public key to ConfigMap `cfzt-sshca-wheetutil-ssh` in the route's namespace (key `ca.pub`). On the SSH server:
+
+```text
+# /etc/ssh/sshd_config.d/50-cloudflare-ca.conf
+PubkeyAuthentication yes
+TrustedUserCAKeys /etc/ssh/cloudflare-ca.pub
+AuthorizedPrincipalsFile /etc/ssh/principals/%u
+```
+
+The certificate's principal is the part of the user's email before the `@`. `/etc/ssh/principals/<login user>` lists the principals allowed to log in as that user, one per line (for `jdoe@example.com` logging in as `admin`: `/etc/ssh/principals/admin` containing `jdoe`). If the Access app is recreated (for example when its type changes), it gets a new CA: copy the new `ca.pub` to the server.
+
+`access.appType: vnc` works the same way for a VNC server (origin `tcp://`), without certificates.

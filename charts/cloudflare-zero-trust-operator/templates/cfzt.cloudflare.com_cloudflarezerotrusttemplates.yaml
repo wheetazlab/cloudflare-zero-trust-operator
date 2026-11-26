@@ -75,6 +75,15 @@ spec:
                       type: boolean
                       default: false
                       description: "Create Cloudflare Access Application"
+                    appType:
+                      type: string
+                      enum: ["self_hosted", "ssh", "vnc"]
+                      default: "self_hosted"
+                      description: "Access application type. self_hosted is a web app; ssh and vnc are browser-rendered (a terminal or VNC viewer in the browser), and the origin derived from the HTTPRoute's backendRef becomes ssh:// or tcp://"
+                    shortLivedCertificate:
+                      type: boolean
+                      default: false
+                      description: "ssh apps only: create an SSH certificate authority for the app so Cloudflare signs a short-lived certificate for the signed-in user. The CA public key is published in ConfigMap cfzt-sshca-<route> next to the HTTPRoute (key ca.pub) for the server's TrustedUserCAKeys"
                     sessionDuration:
                       type: string
                       default: "24h"

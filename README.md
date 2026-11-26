@@ -62,6 +62,8 @@ The chart is published as an OCI artifact on GitHub's container registry, next t
 helm show chart oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator
 ```
 
+The old chart repository, `https://wheetazlab.github.io/cloudflare-zero-trust-operator`, gets new versions until **2027-02-26** and is then frozen (versions already there keep installing). See [Moving to the OCI chart](#moving-to-the-oci-chart).
+
 ### 2. Install with a values file
 
 Create `my-values.yaml`:
@@ -157,6 +159,61 @@ spec:
 ```
 
 The token is read at reconcile time from the referenced Secret — it is never stored in annotations, logs, or state ConfigMaps.
+
+
+## Moving to the OCI chart
+
+The chart moved from the GitHub Pages chart repository (`https://wheetazlab.github.io/cloudflare-zero-trust-operator`) to OCI on GitHub's container registry (`oci://ghcr.io/wheetazlab/charts`). The chart name and versions are the same, so moving is an upgrade of the existing release, nothing is reinstalled.
+
+| Date | Old repository (GitHub Pages) | OCI |
+|---|---|---|
+| Until 2027-02-26 | Gets every new version | Gets every new version |
+| From 2027-02-27 | Frozen: versions already there keep installing | Gets every new version |
+
+**Helm CLI**
+
+```bash
+helm upgrade cloudflare-zero-trust-operator \
+  oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator \
+  --version <version> -n <namespace> --reuse-values
+helm repo remove <name you gave the old repo>
+```
+
+**Argo CD**
+
+1. In the Application, change only the source's address: `repoURL: ghcr.io/wheetazlab/charts` (no `oci://`), same `chart` and `targetRevision`.
+2. If the AppProject limits `sourceRepos`, add `ghcr.io/wheetazlab/charts`.
+3. Declare the OCI repository once (public, no credentials):
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-ghcr-wheetazlab-charts
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  name: ghcr-wheetazlab-charts
+  type: helm
+  url: ghcr.io/wheetazlab/charts
+  enableOCI: "true"
+```
+
+**Flux**
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: wheetazlab
+spec:
+  type: oci
+  url: oci://ghcr.io/wheetazlab/charts
+  interval: 1h
+```
+
+Keep the HelmRelease's `chart: cloudflare-zero-trust-operator` and point its `sourceRef` at this HelmRepository.
 
 ## What It Does
 

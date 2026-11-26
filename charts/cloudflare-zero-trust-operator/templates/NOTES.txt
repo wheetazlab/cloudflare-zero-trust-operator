@@ -46,3 +46,21 @@ Next steps:
 
 For full documentation see:
   https://github.com/wheetazlab/cloudflare-zero-trust-operator
+
+-------------------------------------------------------------------------------
+The chart repository is moving.
+
+The chart is published as an OCI artifact:
+  oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator
+
+If you install it from https://wheetazlab.github.io/cloudflare-zero-trust-operator
+(helm repo add ...), that repository gets new versions until 2027-02-26 and is
+then frozen: versions already there keep installing, new ones are OCI only.
+Moving takes one upgrade, same release, same values:
+
+  helm upgrade {{ .Release.Name }} \
+    oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator \
+    --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reuse-values
+
+Argo CD and Flux: https://github.com/wheetazlab/cloudflare-zero-trust-operator#moving-to-the-oci-chart
+-------------------------------------------------------------------------------

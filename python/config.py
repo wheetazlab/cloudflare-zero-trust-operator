@@ -230,6 +230,13 @@ def merge_settings(
         _deep_get(tpl, "originService", "url",
                   default=_deep_get(base, "originService", "url", default="")),
     )
+    # A template's web origin (often a shared ingress, e.g. Traefik) can't
+    # serve a browser-rendered ssh or vnc app: derive the origin from the
+    # route instead. An origin.url annotation on the route always wins.
+    if (app_type != "self_hosted"
+            and f"{ANNOTATION_PREFIX}origin.url" not in ann
+            and origin_service.split("://", 1)[0] in ("http", "https")):
+        origin_service = ""
     # Auto-derive from backendRefs when not set
     if not origin_service:
         rules = httproute_body.get("spec", {}).get("rules", [])

@@ -189,7 +189,7 @@ spec:
 
 ## Example 6: Browser-rendered SSH with short-lived certificates
 
-Publishes an SSH server as a terminal in the browser. Cloudflare Access signs the user in, then signs a short-lived SSH certificate for them, so the server needs no password or key. The HTTPRoute only describes the hostname and the Service: it has no `parentRefs`, so no gateway serves it; the operator derives `ssh://wheetutil-ssh.vms.svc.cluster.local:22` from the backendRef.
+Publishes an SSH server as a terminal in the browser. Cloudflare Access signs the user in, then signs a short-lived SSH certificate for them, so the server needs no password or key. The HTTPRoute only describes the hostname and the Service: it has no `parentRefs`, so no gateway serves it; the operator derives `ssh://wheetutil-ssh.vms.svc.cluster.local:22` from the backendRef. For `ssh` and `vnc` apps an `http(s)` origin from a template (for example a base template pointing at a shared ingress) is ignored in favour of the backendRef; an `origin.url` annotation still overrides both.
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1

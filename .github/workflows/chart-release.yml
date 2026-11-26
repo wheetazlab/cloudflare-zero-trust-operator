@@ -1,5 +1,11 @@
 name: Release Helm Chart
 
+# Publishes the chart as an OCI artifact to GitHub's container registry, next
+# to the operator image:
+#   oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator:<version>
+# A version that is already there is left alone (bump Chart.yaml's version to
+# publish a change).
+
 on:
   push:
     branches:
@@ -8,100 +14,36 @@ on:
       - 'charts/**'
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+  CHART_DIR: charts/cloudflare-zero-trust-operator
+
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to push to gh-pages branch
+      contents: read
+      packages: write   # push the chart to ghcr.io
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # chart-releaser needs full history to determine versions
-
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Bootstrap gh-pages branch if missing
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Package and push (new versions only)
         run: |
-          if ! git ls-remote --exit-code origin gh-pages; then
-            git checkout --orphan gh-pages
-            git rm -rf .
-            {
-              echo "theme: jekyll-theme-tactile"
-              echo "title: Cloudflare Zero Trust Operator"
-              echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
-            } > _config.yml
-            {
-              echo "## Cloudflare Zero Trust Operator"
-              echo ""
-              echo "A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by watching HTTPRoute resources and reconciling them with the Cloudflare API."
-              echo ""
-              echo "### Install via Helm"
-              echo ""
-              echo '```bash'
-              echo "helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator"
-              echo "helm repo update"
-              echo "helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \\"
-              echo "  --set tenant.create=true \\"
-              echo "  --set tenant.instanceName=mycluster \\"
-              echo "  --set tenant.accountId=<your-account-id> \\"
-              echo "  --set tenant.tunnelId=<your-tunnel-id> \\"
-              echo "  --set tenant.apiToken=<your-api-token>"
-              echo '```'
-              echo ""
-              echo "### Source"
-              echo ""
-              echo "[github.com/wheetazlab/cloudflare-zero-trust-operator](https://github.com/wheetazlab/cloudflare-zero-trust-operator)"
-            } > index.md
-            git add _config.yml index.md
-            git commit -m "chore: init gh-pages with Tactile theme and landing page"
-            git push origin gh-pages
-            git checkout main
+          name=$(yq '.name' "$CHART_DIR/Chart.yaml")
+          version=$(yq '.version' "$CHART_DIR/Chart.yaml")
+          if helm show chart "$CHART_REPO/$name" --version "$version" >/dev/null 2>&1; then
+            echo "$name $version is already published; nothing to do"
+            exit 0
           fi
-
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: Ensure Tactile theme and landing page on gh-pages
-        run: |
-          git fetch origin gh-pages
-          git checkout gh-pages
-          {
-            echo "theme: jekyll-theme-tactile"
-            echo "title: Cloudflare Zero Trust Operator"
-            echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
-          } > _config.yml
-          {
-            echo "## Cloudflare Zero Trust Operator"
-            echo ""
-            echo "A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by watching HTTPRoute resources and reconciling them with the Cloudflare API."
-            echo ""
-            echo "### Install via Helm"
-            echo ""
-            echo '```bash'
-            echo "helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator"
-            echo "helm repo update"
-            echo "helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \\"
-            echo "  --set tenant.create=true \\"
-            echo "  --set tenant.instanceName=mycluster \\"
-            echo "  --set tenant.accountId=<your-account-id> \\"
-            echo "  --set tenant.tunnelId=<your-tunnel-id> \\"
-            echo "  --set tenant.apiToken=<your-api-token>"
-            echo '```'
-            echo ""
-            echo "### Source"
-            echo ""
-            echo "[github.com/wheetazlab/cloudflare-zero-trust-operator](https://github.com/wheetazlab/cloudflare-zero-trust-operator)"
-          } > index.md
-          git add _config.yml index.md
-          git diff --cached --quiet || git commit -m "chore: ensure Tactile theme and landing page [skip ci]"
-          git push origin gh-pages
+          helm package "$CHART_DIR" --destination dist
+          helm push "dist/$name-$version.tgz" "$CHART_REPO"
+          echo "Published $CHART_REPO/$name:$version"

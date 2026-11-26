@@ -5,7 +5,7 @@ description: >
   watching HTTPRoute resources and reconciling them with the Cloudflare API.
   The operator uses kopf (Python) to watch and reconcile resources.
 type: application
-version: 0.3.0
+version: 0.3.1
 appVersion: "0.3.0"
 keywords:
   - cloudflare

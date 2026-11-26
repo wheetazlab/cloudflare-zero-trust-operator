@@ -1,10 +1,16 @@
 name: Release Helm Chart
 
-# Publishes the chart as an OCI artifact to GitHub's container registry, next
-# to the operator image:
-#   oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator:<version>
-# A version that is already there is left alone (bump Chart.yaml's version to
-# publish a change).
+# Publishes the chart to two places:
+# - OCI on GitHub's container registry (the address to use), next to the
+#   operator image:
+#     oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator:<version>
+# - the old chart repository on GitHub Pages (gh-pages branch, chart .tgz
+#   files on GitHub Releases), https://wheetazlab.github.io/cloudflare-zero-trust-operator,
+#   until GH_PAGES_LAST_DAY. After that day new versions go to OCI only; the
+#   old repository is frozen, not deleted, so versions already there keep
+#   installing.
+# A version that is already published is left alone in both places (bump
+# Chart.yaml's version to publish a change).
 
 on:
   push:
@@ -18,17 +24,20 @@ env:
   REGISTRY: ghcr.io
   CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
   CHART_DIR: charts/cloudflare-zero-trust-operator
+  GH_PAGES_LAST_DAY: "2027-02-26"
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # gh-pages branch and the chart's GitHub Releases
       packages: write   # push the chart to ghcr.io
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # chart-releaser needs full history to determine versions
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -36,14 +45,72 @@ jobs:
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
-      - name: Package and push (new versions only)
+      - name: OCI - package and push (new versions only)
         run: |
           name=$(yq '.name' "$CHART_DIR/Chart.yaml")
           version=$(yq '.version' "$CHART_DIR/Chart.yaml")
           if helm show chart "$CHART_REPO/$name" --version "$version" >/dev/null 2>&1; then
-            echo "$name $version is already published; nothing to do"
+            echo "$name $version is already published to OCI; nothing to do"
             exit 0
           fi
           helm package "$CHART_DIR" --destination dist
           helm push "dist/$name-$version.tgz" "$CHART_REPO"
           echo "Published $CHART_REPO/$name:$version"
+
+      - name: Is the old chart repository still published to?
+        id: pages
+        run: |
+          if [ "$(date -u +%F)" \> "$GH_PAGES_LAST_DAY" ]; then
+            echo "Past $GH_PAGES_LAST_DAY: the GitHub Pages chart repository is frozen"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure Git
+        if: steps.pages.outputs.publish == 'true'
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: GitHub Pages - run chart-releaser
+        if: steps.pages.outputs.publish == 'true'
+        uses: helm/chart-releaser-action@v1.6.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: GitHub Pages - landing page with the move notice
+        if: steps.pages.outputs.publish == 'true'
+        run: |
+          git fetch origin gh-pages
+          git checkout gh-pages
+          {
+            echo "theme: jekyll-theme-tactile"
+            echo "title: Cloudflare Zero Trust Operator"
+            echo "description: Helm chart repository for the Cloudflare Zero Trust Operator"
+          } > _config.yml
+          cat > index.md <<MD
+          ## Cloudflare Zero Trust Operator
+
+          A Kubernetes operator that manages Cloudflare Zero Trust tunnel routing by watching HTTPRoute resources and reconciling them with the Cloudflare API.
+
+          ### This chart repository is moving
+
+          The chart is now published as an OCI artifact: \`oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator\`.
+          This repository (\`https://wheetazlab.github.io/cloudflare-zero-trust-operator\`) gets new versions until **$GH_PAGES_LAST_DAY**; after that it is frozen: versions already here keep installing, new ones are only on OCI.
+          How to move (Helm, Argo CD, Flux): [Moving to the OCI chart](https://github.com/wheetazlab/cloudflare-zero-trust-operator#moving-to-the-oci-chart).
+
+          ### Install via Helm (OCI)
+
+          \`\`\`bash
+          helm install cloudflare-zero-trust-operator oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator \\
+            --namespace cloudflare-zero-trust --create-namespace -f my-values.yaml
+          \`\`\`
+
+          ### Source
+
+          [github.com/wheetazlab/cloudflare-zero-trust-operator](https://github.com/wheetazlab/cloudflare-zero-trust-operator)
+          MD
+          git add _config.yml index.md
+          git diff --cached --quiet || git commit -m "chore: landing page with the OCI move notice [skip ci]"
+          git push origin gh-pages

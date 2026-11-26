@@ -54,11 +54,12 @@ The operator authenticates to the Cloudflare API using a scoped API token — **
 
 ## Quick Start
 
-### 1. Add the Helm repository
+### 1. The chart
+
+The chart is published as an OCI artifact on GitHub's container registry, next to the operator image; no `helm repo add` is needed:
 
 ```bash
-helm repo add wheetazlab https://wheetazlab.github.io/cloudflare-zero-trust-operator
-helm repo update
+helm show chart oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator
 ```
 
 ### 2. Install with a values file
@@ -76,7 +77,7 @@ tenant:
 ```
 
 ```bash
-helm install cloudflare-zero-trust-operator wheetazlab/cloudflare-zero-trust-operator \
+helm install cloudflare-zero-trust-operator oci://ghcr.io/wheetazlab/charts/cloudflare-zero-trust-operator \
   --namespace cloudflare-zero-trust \
   --create-namespace \
   -f my-values.yaml

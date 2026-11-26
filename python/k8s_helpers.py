@@ -196,6 +196,66 @@ def delete_secret(namespace: str, name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# SSH CA public key ConfigMap
+# ---------------------------------------------------------------------------
+
+SSH_CA_KEY = "ca.pub"
+
+
+def ssh_ca_configmap_name(route_name: str) -> str:
+    return f"cfzt-sshca-{route_name}"
+
+
+def write_ssh_ca_configmap(
+    namespace: str,
+    name: str,
+    route_name: str,
+    hostname: str,
+    public_key: str,
+) -> None:
+    """Publish an Access app's SSH CA public key next to its HTTPRoute.
+
+    Not secret: an SSH server needs it in TrustedUserCAKeys to accept the
+    short-lived certificates Cloudflare signs. Deliberately not labelled
+    managed-by, so it is never mistaken for a state ConfigMap.
+    """
+    core = k8s.CoreV1Api()
+    body = k8s.V1ConfigMap(
+        metadata=k8s.V1ObjectMeta(
+            name=name,
+            namespace=namespace,
+            labels={
+                "cfzt.cloudflare.com/ssh-ca": "true",
+                "cfzt.cloudflare.com/httproute-name": route_name,
+            },
+            annotations={"cfzt.cloudflare.com/hostname": hostname},
+        ),
+        data={SSH_CA_KEY: public_key.strip() + "\n"},
+    )
+    try:
+        core.read_namespaced_config_map(name, namespace)
+        core.replace_namespaced_config_map(name, namespace, body)
+    except ApiException as exc:
+        if exc.status == 404:
+            core.create_namespaced_config_map(namespace, body)
+        else:
+            raise
+    logger.info("SSH CA ConfigMap written: %s/%s", namespace, name)
+
+
+def delete_configmap(namespace: str, name: str) -> None:
+    """Delete a ConfigMap.  Ignores 404."""
+    if not name:
+        return
+    core = k8s.CoreV1Api()
+    try:
+        core.delete_namespaced_config_map(name, namespace)
+    except ApiException as exc:
+        if exc.status != 404:
+            raise
+
+
+# ---------------------------------------------------------------------------
 # CRD lookups
 # ---------------------------------------------------------------------------
 

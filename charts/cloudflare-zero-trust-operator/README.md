@@ -498,6 +498,8 @@ Reusable configuration template that `HTTPRoute` resources reference via `cfzt.c
 | `spec.originService.originTLS.*` | TLS settings for origin connection (noTLSVerify, tlsTimeout, http2Origin, matchSNIToHost) |
 | `spec.accessApplication.enabled` | Create a Cloudflare Access Application for this route |
 | `spec.accessApplication.sessionDuration` | Access session duration (e.g. `24h`) |
+| `spec.accessApplication.appType` | `self_hosted` (default), `ssh` or `vnc` (browser-rendered; derived origin `ssh://` or `tcp://`) |
+| `spec.accessApplication.shortLivedCertificate` | `ssh` apps: SSH CA for short-lived certificates; public key in ConfigMap `cfzt-sshca-<route>` |
 | `spec.accessApplication.existingPolicyNames` | Cloudflare Access policy names — resolved to UUIDs at reconcile time |
 | `spec.accessApplication.autoRedirectToIdentity` | Auto-redirect to IdP login |
 | `spec.accessApplication.appLauncherVisible` | Show in Cloudflare App Launcher |

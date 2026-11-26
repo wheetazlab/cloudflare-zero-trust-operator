@@ -24,9 +24,24 @@ class OriginTLS:
     match_sni_to_host: bool = False
 
 
+# Access application types the operator can create, and the scheme of the
+# origin it derives for each from the HTTPRoute's backendRef. ssh and vnc are
+# browser-rendered: Cloudflare shows a terminal or a VNC viewer in the browser
+# and reaches the origin through the tunnel as raw TCP.
+ACCESS_APP_TYPES: dict[str, str] = {
+    "self_hosted": "http",
+    "ssh": "ssh",
+    "vnc": "tcp",
+}
+
+
 @dataclass
 class AccessSettings:
     enabled: bool = False
+    app_type: str = "self_hosted"
+    # ssh only: an SSH certificate authority for the app, so Cloudflare signs
+    # a short-lived certificate for the signed-in user (no password or key).
+    short_lived_certificate: bool = False
     session_duration: str = "24h"
     allow_groups: list[str] = field(default_factory=list)
     allow_emails: list[str] = field(default_factory=list)
@@ -97,6 +112,7 @@ _OPERATOR_WRITTEN_SUFFIXES: frozenset[str] = frozenset({
     "accessPolicyIds",
     "serviceTokenId",
     "serviceTokenSecretName",
+    "sshCaConfigMap",
 })
 
 
@@ -194,6 +210,20 @@ def merge_settings(
                                       default=_deep_get(base, "dnsOnly", "ingressServiceRef")),
     )
 
+    # --- Access app type (decides the derived origin's scheme) -------------
+    def _access_val(key, default):
+        return _deep_get(tpl, "accessApplication", key,
+                         default=_deep_get(base, "accessApplication", key,
+                                           default=default))
+
+    app_type = ann.get(f"{ANNOTATION_PREFIX}access.appType",
+                       _access_val("appType", "self_hosted"))
+    if app_type not in ACCESS_APP_TYPES:
+        raise ValueError(
+            f"Unsupported access.appType '{app_type}' for {hostname}; "
+            f"use one of {sorted(ACCESS_APP_TYPES)}"
+        )
+
     # --- Origin service ---------------------------------------------------
     origin_service = ann.get(
         f"{ANNOTATION_PREFIX}origin.url",
@@ -208,7 +238,7 @@ def merge_settings(
             if refs:
                 ns = httproute_body["metadata"]["namespace"]
                 origin_service = (
-                    f"http://{refs[0]['name']}.{ns}"
+                    f"{ACCESS_APP_TYPES[app_type]}://{refs[0]['name']}.{ns}"
                     f".svc.cluster.local:{refs[0]['port']}"
                 )
 
@@ -239,14 +269,13 @@ def merge_settings(
     )
 
     # --- Access Application -----------------------------------------------
-    def _access_val(key, default):
-        return _deep_get(tpl, "accessApplication", key,
-                         default=_deep_get(base, "accessApplication", key,
-                                           default=default))
-
     access = AccessSettings(
         enabled=_bool(ann.get(f"{ANNOTATION_PREFIX}access.enabled",
                               _access_val("enabled", False))),
+        app_type=app_type,
+        short_lived_certificate=_bool(
+            ann.get(f"{ANNOTATION_PREFIX}access.shortLivedCertificate",
+                    _access_val("shortLivedCertificate", False))),
         session_duration=ann.get(f"{ANNOTATION_PREFIX}access.sessionDuration",
                                  _access_val("sessionDuration", "24h")),
         allow_groups=_split_csv(ann.get(f"{ANNOTATION_PREFIX}access.allowGroups",

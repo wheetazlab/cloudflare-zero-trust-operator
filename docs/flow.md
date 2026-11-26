@@ -323,6 +323,8 @@ flowchart LR
 | **matchSNIToHost** | — | `spec.originService.originTLS.matchSNIToHost` | `false` |
 | **Access enabled** | `cfzt.cloudflare.com/access.enabled` | `spec.accessApplication.enabled` | `false` |
 | **Session duration** | `cfzt.cloudflare.com/access.sessionDuration` | `spec.accessApplication.sessionDuration` | `"24h"` |
+| **App type** | `cfzt.cloudflare.com/access.appType` | `spec.accessApplication.appType` | `"self_hosted"` |
+| **Short-lived SSH certificates** | `cfzt.cloudflare.com/access.shortLivedCertificate` | `spec.accessApplication.shortLivedCertificate` | `false` |
 | **Allow groups** | `cfzt.cloudflare.com/access.allowGroups` | `spec.accessApplication.allowGroups` | `[]` |
 | **Allow emails** | `cfzt.cloudflare.com/access.allowEmails` | `spec.accessApplication.allowEmails` | `[]` |
 | **Existing policy names** | `cfzt.cloudflare.com/access.existingPolicyNames` | `spec.accessApplication.existingPolicyNames` | `[]` |

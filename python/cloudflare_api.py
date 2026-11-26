@@ -378,6 +378,7 @@ def _build_access_app_payload(
     name: str,
     domain: str,
     *,
+    app_type: str = "self_hosted",
     session_duration: str = "24h",
     auto_redirect_to_identity: bool = False,
     enable_binding_cookie: bool = False,
@@ -395,24 +396,27 @@ def _build_access_app_payload(
     payload: dict[str, Any] = {
         "name": name,
         "domain": domain,
-        "type": "self_hosted",
+        "type": app_type,
         "session_duration": session_duration,
         "auto_redirect_to_identity": auto_redirect_to_identity,
         "enable_binding_cookie": enable_binding_cookie,
         "http_only_cookie_attribute": http_only_cookie_attribute,
-        "same_site_cookie_attribute": same_site_cookie_attribute,
-        "skip_interstitial": skip_interstitial,
         "app_launcher_visible": app_launcher_visible,
-        "service_auth_401_redirect": service_auth_401_redirect,
     }
     if logo_url:
         payload["logo_url"] = logo_url
-    if custom_deny_message:
-        payload["custom_deny_message"] = custom_deny_message
-    if custom_deny_url:
-        payload["custom_deny_url"] = custom_deny_url
-    if custom_non_identity_deny_url:
-        payload["custom_non_identity_deny_url"] = custom_non_identity_deny_url
+    # Settings that only apply to web (self-hosted) apps; browser-rendered
+    # ssh and vnc apps don't take them.
+    if app_type == "self_hosted":
+        payload["same_site_cookie_attribute"] = same_site_cookie_attribute
+        payload["skip_interstitial"] = skip_interstitial
+        payload["service_auth_401_redirect"] = service_auth_401_redirect
+        if custom_deny_message:
+            payload["custom_deny_message"] = custom_deny_message
+        if custom_deny_url:
+            payload["custom_deny_url"] = custom_deny_url
+        if custom_non_identity_deny_url:
+            payload["custom_non_identity_deny_url"] = custom_non_identity_deny_url
     if policy_ids:
         payload["policies"] = [{"id": pid} for pid in policy_ids]
     return payload
@@ -428,6 +432,10 @@ def upsert_access_app(
 ) -> dict:
     """Create or update a Cloudflare Access Application.
 
+    An app's type can't be changed in place, so an existing app of another
+    type (for example self_hosted → ssh) is deleted and created again; its
+    policies and SSH CA go with it.
+
     Returns ``{"app_id": ..., "created": bool}``.
     """
     payload = _build_access_app_payload(app_name, domain, **kwargs)
@@ -440,6 +448,23 @@ def upsert_access_app(
             if getattr(app, "domain", None) == domain:
                 resolved_id = app.id
                 break
+
+    if resolved_id:
+        try:
+            current = client.zero_trust.access.applications.get(
+                app_id=resolved_id, account_id=account_id,
+            )
+        except cf_errors.NotFoundError:
+            resolved_id = ""
+        else:
+            current_type = getattr(current, "type", None)
+            if current_type and current_type != payload["type"]:
+                logger.info(
+                    "Access app %s is %s, wanted %s: recreating",
+                    resolved_id, current_type, payload["type"],
+                )
+                delete_access_app(client, account_id, resolved_id)
+                resolved_id = ""
 
     if resolved_id:
         client.zero_trust.access.applications.update(
@@ -471,6 +496,56 @@ def delete_access_app(
             app_id=app_id, account_id=account_id,
         )
         logger.info("Access app deleted: %s", app_id)
+    except cf_errors.NotFoundError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Short-lived SSH certificates (per-app SSH certificate authority)
+# ---------------------------------------------------------------------------
+
+def ensure_ssh_ca(
+    client: Cloudflare,
+    account_id: str,
+    app_id: str,
+) -> str:
+    """Make sure the Access app has an SSH CA; return its public key.
+
+    With a CA, Cloudflare signs a short-lived SSH certificate for the user
+    who signed in to the app (principal: the part of their email before
+    the @). The SSH server trusts the CA's public key (TrustedUserCAKeys).
+    """
+    ca = None
+    try:
+        ca = client.zero_trust.access.applications.cas.get(
+            app_id=app_id, account_id=account_id,
+        )
+    except cf_errors.NotFoundError:
+        ca = None
+    if not ca or not getattr(ca, "public_key", None):
+        ca = client.zero_trust.access.applications.cas.create(
+            app_id=app_id, account_id=account_id,
+        )
+        logger.info("SSH CA created for Access app %s", app_id)
+    public_key = getattr(ca, "public_key", "") if ca else ""
+    if not public_key:
+        raise RuntimeError(f"Cloudflare returned no SSH CA public key for app {app_id}")
+    return public_key
+
+
+def delete_ssh_ca(
+    client: Cloudflare,
+    account_id: str,
+    app_id: str,
+) -> None:
+    """Delete the Access app's SSH CA.  Ignores 404."""
+    if not app_id:
+        return
+    try:
+        client.zero_trust.access.applications.cas.delete(
+            app_id=app_id, account_id=account_id,
+        )
+        logger.info("SSH CA deleted for Access app %s", app_id)
     except cf_errors.NotFoundError:
         pass
 

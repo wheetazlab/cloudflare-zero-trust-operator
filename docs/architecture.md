@@ -592,6 +592,7 @@ The operator reads configuration from HTTPRoute annotations and writes results b
 | `cfzt.cloudflare.com/accessPolicyIds` | Access Policy ID(s) |
 | `cfzt.cloudflare.com/serviceTokenId` | Service Token ID |
 | `cfzt.cloudflare.com/serviceTokenSecretName` | K8s Secret name |
+| `cfzt.cloudflare.com/sshCaConfigMap` | ConfigMap with the SSH CA public key (`ssh` apps with short-lived certificates) |
 
 ---
 

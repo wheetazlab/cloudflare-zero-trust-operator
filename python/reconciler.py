@@ -82,13 +82,17 @@ def reconcile_httproute(
         base_tpl = k8s.get_template(base_tpl_name, op_ns)
 
     # --- Merge settings ---------------------------------------------------
-    settings = merge_settings(
-        annotations,
-        body,
-        tenant,
-        per_route_tpl.get("spec", {}) if per_route_tpl else None,
-        base_tpl.get("spec", {}) if base_tpl else None,
-    )
+    try:
+        settings = merge_settings(
+            annotations,
+            body,
+            tenant,
+            per_route_tpl.get("spec", {}) if per_route_tpl else None,
+            base_tpl.get("spec", {}) if base_tpl else None,
+        )
+    except ValueError as exc:
+        # A bad setting (e.g. an unknown access.appType) won't fix itself.
+        raise kopf.PermanentError(str(exc)) from exc
 
     # --- Change detection -------------------------------------------------
     per_route_spec = per_route_tpl.get("spec", {}) if per_route_tpl else None
@@ -146,7 +150,7 @@ def reconcile_httproute(
     # --- Access Application -----------------------------------------------
     if settings.access.enabled:
         _reconcile_access(client, settings, zone_id, existing_state,
-                          state, result_annotations, log)
+                          state, result_annotations, namespace, name, log)
 
     # --- Service Token ----------------------------------------------------
     if settings.service_token.enabled:
@@ -200,6 +204,19 @@ def _cleanup_stale_resources(
     # --- Revoke access controls first (before any DNS/routing changes) ----
     # Removing auth before changing routing ensures there is never a window
     # where a route is live but unprotected.
+
+    # Short-lived SSH certificates no longer wanted: drop the CA (if the app
+    # stays) and its public key ConfigMap. A deleted app takes its CA along.
+    wants_ssh_ca = (settings.access.enabled
+                    and settings.access.app_type == "ssh"
+                    and settings.access.short_lived_certificate)
+    if not wants_ssh_ca and existing_state.get("ssh_ca_configmap"):
+        if settings.access.enabled and existing_state.get("access_app_id"):
+            log.info("Template change: removing SSH CA of Access App %s",
+                     existing_state["access_app_id"])
+            cfapi.delete_ssh_ca(client, account_id,
+                                existing_state["access_app_id"])
+        k8s.delete_configmap(namespace, existing_state["ssh_ca_configmap"])
 
     # Access App no longer needed
     if not settings.access.enabled and existing_state.get("access_app_id"):
@@ -338,9 +355,11 @@ def _reconcile_access(
     existing_state: dict,
     state: dict,
     result_annotations: dict,
+    namespace: str,
+    route_name: str,
     log: logging.Logger,
 ) -> None:
-    """Upsert Access Application and policy."""
+    """Upsert Access Application and policy (and SSH CA for ssh apps)."""
     # Resolve reusable policy names → IDs
     reusable_ids = cfapi.resolve_policy_ids(
         client, settings.account_id, settings.access.existing_policy_names,
@@ -353,6 +372,7 @@ def _reconcile_access(
         app_name,
         settings.hostname,
         existing_app_id=existing_state.get("access_app_id", ""),
+        app_type=settings.access.app_type,
         session_duration=settings.access.session_duration,
         auto_redirect_to_identity=settings.access.auto_redirect_to_identity,
         enable_binding_cookie=settings.access.enable_binding_cookie,
@@ -369,6 +389,27 @@ def _reconcile_access(
     )
     state["access_app_id"] = app_result["app_id"]
     result_annotations[f"{ANNOTATION_PREFIX}accessAppId"] = app_result["app_id"]
+
+    # Short-lived SSH certificates: the app's CA, its public key published in
+    # a ConfigMap next to the route for the SSH server to trust. Written on
+    # every reconcile, so a recreated app's new CA replaces the old key.
+    if settings.access.short_lived_certificate:
+        if settings.access.app_type != "ssh":
+            log.warning(
+                "access.shortLivedCertificate is set but access.appType is %s, "
+                "not ssh: no SSH CA for %s", settings.access.app_type,
+                settings.hostname,
+            )
+        else:
+            public_key = cfapi.ensure_ssh_ca(
+                client, settings.account_id, app_result["app_id"],
+            )
+            cm_name = k8s.ssh_ca_configmap_name(route_name)
+            k8s.write_ssh_ca_configmap(
+                namespace, cm_name, route_name, settings.hostname, public_key,
+            )
+            state["ssh_ca_configmap"] = cm_name
+            result_annotations[f"{ANNOTATION_PREFIX}sshCaConfigMap"] = cm_name
 
     # Create/update allow policy when groups or emails are specified
     if settings.access.allow_groups or settings.access.allow_emails:
@@ -496,6 +537,9 @@ def delete_httproute_resources(
     if svc_secret:
         k8s.delete_secret(namespace, svc_secret)
 
+    # Delete the SSH CA public key ConfigMap (the CA went with the app)
+    k8s.delete_configmap(namespace, state.get("ssh_ca_configmap", ""))
+
     # Delete the state ConfigMap itself
     k8s.delete_state(namespace, name)
     log.info("Deleted resources for %s/%s", namespace, name)
@@ -512,6 +556,7 @@ STATUS_ANNOTATIONS = (
     "hostnameRouteId",
     "serviceTokenId",
     "serviceTokenSecretName",
+    "sshCaConfigMap",
 )
 
 

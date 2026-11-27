@@ -90,14 +90,22 @@ def on_httproute_reconcile(
     namespace: str,
     logger: logging.Logger,
     **_,
-) -> dict:
-    """Reconcile an HTTPRoute against Cloudflare, or tear down if disabled."""
+) -> None:
+    """Reconcile an HTTPRoute against Cloudflare, or tear down if disabled.
+
+    Returns nothing on purpose: kopf writes a handler's return value into the
+    object's status, and an HTTPRoute's status belongs to the Gateway API.
+    Its schema requires status.parents, so on a route with no gateway (ssh
+    and vnc apps) the write is rejected (422) and kopf throttles and retries;
+    on other routes the field is pruned anyway.
+    """
     annotations = meta.get("annotations") or {}
     if annotations.get(ENABLED_ANNOTATION) != "true":
         reconciler.disable_httproute(name, namespace, annotations, logger)
-        return {"message": f"Disabled {namespace}/{name}"}
+        logger.info("Disabled %s/%s", namespace, name)
+        return
     reconciler.reconcile_httproute(name, namespace, body, logger)
-    return {"message": f"Reconciled {namespace}/{name}"}
+    logger.info("Reconciled %s/%s", namespace, name)
 
 
 @kopf.on.delete(**HTTPROUTE_KWARGS)
@@ -125,8 +133,12 @@ def on_template_update(
     namespace: str,
     logger: logging.Logger,
     **_,
-) -> dict:
-    """When a template changes, re-reconcile all HTTPRoutes that use it."""
+) -> None:
+    """When a template changes, re-reconcile all HTTPRoutes that use it.
+
+    Returns nothing, like on_httproute_reconcile: kopf would write a return
+    value into the template's status, where the schema has no field for it.
+    """
     import k8s_helpers as k8s
 
     routes = k8s.list_httproutes()
@@ -153,7 +165,7 @@ def on_template_update(
                 "Failed to re-reconcile %s/%s after template change",
                 rt_ns, rt_name,
             )
-    return {"message": f"Re-reconciled {matched} HTTPRoute(s) for template {name}"}
+    logger.info("Re-reconciled %d HTTPRoute(s) for template %s", matched, name)
 
 
 # ---------------------------------------------------------------------------
